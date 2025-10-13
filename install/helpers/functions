@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# install/helpers/functions - Helper functions for okonomi installer
+# Simplified for direct installation (no ISO build mode)
+
+# Copy config files with proper permissions
+install_config() {
+  local src="$1"
+  local dst="$2"
+  local mode="${3:-644}"
+
+  mkdir -p "$(dirname "$dst")"
+  install -Dm"$mode" "$src" "$dst"
+}
+
+# Copy directory recursively
+install_config_dir() {
+  local src="$1"
+  local dst="$2"
+
+  mkdir -p "$dst"
+  cp -r "$src"/* "$dst"/
+}
+
+# Log functions
+log_info() { echo -e "\e[34mℹ\e[0m $*"; }
+log_success() { echo -e "\e[32m✓\e[0m $*"; }
+log_warn() { echo -e "\e[33m⚠\e[0m $*"; }
+log_error() { echo -e "\e[31m✗\e[0m $*"; }
+
+# Run a command with logging
+run_logged() {
+  local desc="$1"
+  shift
+  log_info "$desc"
+  if "$@"; then
+    log_success "$desc"
+  else
+    log_error "$desc failed"
+    return 1
+  fi
+}

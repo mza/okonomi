@@ -1,0 +1,42 @@
+# okonomi packages - installed on target system
+
+# Core system (most from base Arch install)
+sudo
+vim
+git
+networkmanager
+openssh
+
+# Graphics + Wayland
+mesa
+libglvnd
+vulkan-icd-loader
+xorg-xwayland
+
+# Audio
+pipewire
+wireplumber
+pipewire-alsa
+
+# Desktop portals
+xdg-desktop-portal
+xdg-desktop-portal-hyprland
+
+# Hyprland desktop
+hyprland
+hyprpaper
+waybar
+rofi
+kitty
+wl-clipboard
+grim
+slurp
+dunst
+archlinux-wallpaper
+polkit
+polkit-gnome
+rsync
+seatd
+
+# Display manager
+greetd

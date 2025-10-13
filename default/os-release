@@ -1,0 +1,7 @@
+NAME="Okonomi"
+PRETTY_NAME="Okonomi"
+ID=okonomi
+BUILD_ID="$(date -u +%Y%m%d)"
+HOME_URL="https://okonomi.net"
+SUPPORT_URL="https://okonomi.net/support"
+BUG_REPORT_URL="https://okonomi.net/issues"

@@ -1,0 +1,8 @@
+[terminal]
+vt = 1
+
+# Use default_session rather than initial_session; it's the supported path for "always boot to desktop"
+[default_session]
+# Absolute path, capital H, with dbus-run-session and required env
+command = "dbus-run-session -- env XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=Hyprland WLR_RENDERER_ALLOW_SOFTWARE=1 /usr/bin/Hyprland"
+user = "demo"
