@@ -50,7 +50,7 @@ else
             log_success "WiFi configuration saved to $WIFI_BACKUP_DIR"
             log_info "Note: These configs contain passwords. Keep your okonomi repo private!"
         else
-            log_warning "No WiFi connections found to backup"
+            log_warn "No WiFi connections found to backup"
         fi
     fi
 fi
