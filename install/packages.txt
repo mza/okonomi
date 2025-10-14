@@ -4,6 +4,7 @@
 sudo
 vim
 git
+github-cli
 networkmanager
 openssh
 
