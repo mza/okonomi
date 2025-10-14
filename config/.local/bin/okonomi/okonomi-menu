@@ -1,0 +1,46 @@
+#!/bin/bash
+
+echo "menu"
+
+menu() {
+  local prompt="$1"
+  local options="$2"
+  local extra="$3"
+  local preselect="$4"
+
+  read -r -a args <<<"$extra"
+
+  if [[ -n "$preselect" ]]; then
+    local index
+    index=$(echo -e "$options" | grep -nxF "$preselect" | cut -d: -f1)
+    if [[ -n "$index" ]]; then
+      args+=("-a" "$index")
+    fi
+  fi
+
+  echo -e "$options" | walker --dmenu --theme dmenu_250 -p "$prompt…" "${args[@]}"
+}
+
+show_main_menu() {
+  go_to_menu "$(menu "Okonomi" "  Imagine\n  ")"
+}
+
+show_learn_menu() {
+  case $(menu "Learn" "  Keybindings\n  Omarchy\n  Hyprland\n  Arch\n  Neovim\n  Bash") in
+  *Keybindings*) omarchy-menu-keybindings ;;
+  *Omarchy*) omarchy-launch-webapp "https://learn.omacom.io/2/the-omarchy-manual" ;;
+  *Hyprland*) omarchy-launch-webapp "https://wiki.hypr.land/" ;;
+  *Arch*) omarchy-launch-webapp "https://wiki.archlinux.org/title/Main_page" ;;
+  *Bash*) omarchy-launch-webapp "https://devhints.io/bash" ;;
+  *Neovim*) omarchy-launch-webapp "https://www.lazyvim.org/keymaps" ;;
+  *) show_main_menu ;;
+  esac
+}
+
+go_to_menu() {
+  case "${1,,}" in
+  *imagine*) show_learn_menu ;;
+  esac
+}
+
+show_main_menu
