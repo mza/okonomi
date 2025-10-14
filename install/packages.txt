@@ -9,6 +9,8 @@ networkmanager
 openssh
 python
 python-pip
+nodejs
+npm
 
 # Graphics + Wayland
 mesa
