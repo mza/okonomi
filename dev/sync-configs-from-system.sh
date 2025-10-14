@@ -102,11 +102,19 @@ if [ -d "config/.local/bin" ]; then
 fi
 
 # Sync okonomi bin scripts
-if [ -d "config/.local/bin/okonomi" ]; then
-    for repo_file in config/.local/bin/okonomi/*; do
-        [ -f "$repo_file" ] || continue
-        system_file="$HOME/.local/bin/okonomi/$(basename "$repo_file")"
-        sync_if_newer "$system_file" "$repo_file"
+mkdir -p "config/.local/bin/okonomi"
+if [ -d "$HOME/.local/bin/okonomi" ]; then
+    for system_file in "$HOME/.local/bin/okonomi"/*; do
+        [ -f "$system_file" ] || continue
+        repo_file="config/.local/bin/okonomi/$(basename "$system_file")"
+
+        # If file doesn't exist in repo, copy it
+        if [ ! -f "$repo_file" ]; then
+            echo "  Syncing (new): $system_file -> $repo_file"
+            cp "$system_file" "$repo_file"
+        else
+            sync_if_newer "$system_file" "$repo_file"
+        fi
     done
 fi
 
