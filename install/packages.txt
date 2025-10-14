@@ -28,7 +28,7 @@ hyprland
 hyprpaper
 waybar
 rofi
-kitty
+alacritty
 wl-clipboard
 grim
 slurp
