@@ -68,6 +68,14 @@ if [ -d "config/waybar" ]; then
     done
 fi
 
+if [ -d "config/alacritty" ]; then
+    for repo_file in config/alacritty/*; do
+        [ -f "$repo_file" ] || continue
+        system_file="$HOME/.config/alacritty/$(basename "$repo_file")"
+        sync_if_newer "$system_file" "$repo_file"
+    done
+fi
+
 if [ -d "config/environment.d" ]; then
     for repo_file in config/environment.d/*; do
         [ -f "$repo_file" ] || continue
