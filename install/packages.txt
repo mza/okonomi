@@ -40,3 +40,8 @@ seatd
 
 # Display manager
 greetd
+
+# Display configuration
+rust
+cargo
+wlr-randr
