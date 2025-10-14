@@ -9,12 +9,12 @@ source "$OKONOMI_ROOT/install/helpers/functions"
 
 log_info "Installing walker..."
 
-# Install walker from AUR
+# Install walker-bin from AUR (binary package without extra dependencies)
 # Note: This requires an AUR helper (yay/paru) to be installed
 if command -v yay &> /dev/null; then
-    yay -S --needed --noconfirm walker
+    yay -S --needed --noconfirm walker-bin
 elif command -v paru &> /dev/null; then
-    paru -S --needed --noconfirm walker
+    paru -S --needed --noconfirm walker-bin
 else
     log_error "AUR helper (yay or paru) not found. Please install one first."
     exit 1
