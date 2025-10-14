@@ -111,6 +111,15 @@ if [ -d "config/.profile.d" ]; then
     done
 fi
 
+# Sync bashrc.d scripts
+if [ -d "config/.bashrc.d" ]; then
+    for repo_file in config/.bashrc.d/*; do
+        [ -f "$repo_file" ] || continue
+        system_file="$HOME/.bashrc.d/$(basename "$repo_file")"
+        sync_if_newer "$system_file" "$repo_file"
+    done
+fi
+
 echo ""
 echo "Sync complete!"
 echo ""
