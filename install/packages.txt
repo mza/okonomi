@@ -45,3 +45,9 @@ greetd
 rust
 cargo
 wlr-randr
+
+# Browser
+chromium
+
+# Session management
+uwsm

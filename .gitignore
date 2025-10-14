@@ -4,4 +4,4 @@
 .DS_Store
 
 # Local WiFi configs (contain passwords)
-.local/
+.local/wifi-configs/
