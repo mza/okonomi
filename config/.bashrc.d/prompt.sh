@@ -1,5 +1,5 @@
 # Custom bash prompt
 # Add your PS1 customization here
+# https://bash-prompt-generator.org/
 
-# Example: simple colored prompt
-# PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+PROMPT_COMMAND='PS1_CMD1=$(git branch --show-current 2>/dev/null)'; PS1='\W \[\e[2m\]${PS1_CMD1}\[\e[0m\] > '
