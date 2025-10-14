@@ -9,10 +9,36 @@ OKONOMI_ROOT="${OKONOMI_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 echo "Syncing configs from system to repo..."
 echo ""
 
+# Load sync ignore patterns
+declare -a IGNORE_PATTERNS=()
+if [ -f "$OKONOMI_ROOT/.syncignore" ]; then
+    while IFS= read -r line; do
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^# ]] && continue
+        IGNORE_PATTERNS+=("$line")
+    done < "$OKONOMI_ROOT/.syncignore"
+fi
+
+# Helper function to check if file should be ignored
+is_ignored() {
+    local file="$1"
+    for pattern in "${IGNORE_PATTERNS[@]}"; do
+        if [[ "$file" == "$pattern" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Helper function to sync a file if system version is newer
 sync_if_newer() {
     local system_file="$1"
     local repo_file="$2"
+
+    # Check if this file is in the ignore list
+    if is_ignored "$repo_file"; then
+        return
+    fi
 
     if [ -f "$system_file" ]; then
         if [ "$system_file" -nt "$repo_file" ]; then

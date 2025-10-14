@@ -1,0 +1,8 @@
+# .syncignore - Files to never sync from system back to repo
+# These files are installed once as defaults but each system keeps its own version
+
+# Display configuration (hardware-specific)
+config/hypr/display-monitors.conf
+
+# Display-tui config (may contain system-specific settings)
+config/display-tui/config.json
