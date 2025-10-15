@@ -22,7 +22,7 @@ menu() {
 }
 
 show_main_menu() {
-  go_to_menu "$(menu "Okonomi" "  Imagine\n  ")"
+  go_to_menu "$(menu "Okonomi" "Imagine\nScreensaver")"
 }
 
 show_learn_menu() {
@@ -40,6 +40,7 @@ show_learn_menu() {
 go_to_menu() {
   case "${1,,}" in
   *imagine*) show_learn_menu ;;
+  *screensaver*) okonomi-launch-screensaver;;
   esac
 }
 
