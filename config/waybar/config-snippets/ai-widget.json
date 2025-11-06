@@ -1,0 +1,11 @@
+{
+  "custom/ai": {
+    "exec": "~/.config/waybar/scripts/ai-status",
+    "return-type": "json",
+    "interval": 2,
+    "on-click": "ai-launch-odo",
+    "on-click-right": "~/.local/bin/ai odo reset && notify-send 'AI Odometer' 'Trip reset'",
+    "on-click-middle": "ai-launch-speed",
+    "format": "{}"
+  }
+}

@@ -3,7 +3,7 @@
   "position": "top",
   "height": 28,
   "modules-left": ["hyprland/workspaces", "window"],
-  "modules-center": ["custom/okonomi"],
+  "modules-center": ["custom/ai"],
   "modules-right": ["clock"],
   "hyprland/workspaces": {
     "on-click": "activate",
@@ -31,6 +31,15 @@
   },
   "custom/okonomi": {
     "format": "()  /&lt; ()  |\\|  ()  |\\/|  |"
+  },
+  "custom/ai": {
+    "exec": "~/.config/waybar/scripts/ai-status",
+    "return-type": "json",
+    "interval": 2,
+    "on-click": "ai-launch-odo",
+    "on-click-right": "~/.local/bin/ai odo reset && notify-send 'AI Odometer' 'Trip reset'",
+    "on-click-middle": "ai-launch-speed",
+    "format": "{}"
   },
   "clock": {
     "interval": 60,

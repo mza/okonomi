@@ -1,0 +1,4 @@
+#!/bin/bash
+# Generic launcher for AI commands in floating terminal
+cmd="$*"
+exec setsid uwsm-app -- alacritty --class=Imagine -e bash -c "$cmd"

@@ -1,0 +1,632 @@
+#!/bin/bash
+
+# ╔═══════════════════════════════════════════════════════════════════╗
+# ║                         FULCRUM 2.0                                ║
+# ║              Multi-App Container Orchestrator                      ║
+# ╚═══════════════════════════════════════════════════════════════════╝
+
+set -e
+
+VERSION="2.0.0"
+FULCRUM_HOME="$HOME/.fulcrum"
+APPS_DIR="$FULCRUM_HOME/apps"
+LOGS_DIR="$FULCRUM_HOME/logs"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+PURPLE='\033[0;35m'
+NC='\033[0m'
+
+# ═══════════════════════════════════════════════════════════════════
+# Logging
+# ═══════════════════════════════════════════════════════════════════
+
+log_info() { echo -e "${CYAN}ℹ${NC} $1"; }
+log_success() { echo -e "${GREEN}✓${NC} $1"; }
+log_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
+log_error() { echo -e "${RED}✗${NC} $1"; }
+
+# ═══════════════════════════════════════════════════════════════════
+# Registry Management
+# ═══════════════════════════════════════════════════════════════════
+
+init_registry() {
+    mkdir -p "$APPS_DIR" "$LOGS_DIR"
+}
+
+app_exists() {
+    [ -d "$APPS_DIR/$1" ]
+}
+
+detect_app_from_pwd() {
+    # Try to detect app based on current directory
+    local current_path=$(pwd)
+    init_registry
+
+    for app_dir in "$APPS_DIR"/*; do
+        if [ -d "$app_dir" ]; then
+            local app=$(basename "$app_dir")
+            local app_path=$(get_app_config "$app" "path")
+            if [ "$app_path" = "$current_path" ]; then
+                echo "$app"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+get_app_config() {
+    local app=$1
+    local key=$2
+    if [ -f "$APPS_DIR/$app/config.yml" ]; then
+        grep "^$key:" "$APPS_DIR/$app/config.yml" | cut -d: -f2- | xargs
+    fi
+}
+
+save_app_config() {
+    local app=$1
+    local path=$2
+    local base_port=$3
+    
+    cat > "$APPS_DIR/$app/config.yml" <<EOF
+name: $app
+path: $path
+base_port: $base_port
+dev_port: $base_port
+test_port: $((base_port + 1))
+prod_port: $((base_port + 2))
+EOF
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Container Management
+# ═══════════════════════════════════════════════════════════════════
+
+get_next_port() {
+    # Find next available port starting from 3000
+    local port=3000
+    while netstat -tuln 2>/dev/null | grep -q ":$port " || \
+          ss -tuln 2>/dev/null | grep -q ":$port "; do
+        port=$((port + 3))  # Increment by 3 to leave room for dev/test/prod
+    done
+    echo $port
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Tunnel Management
+# ═══════════════════════════════════════════════════════════════════
+
+get_tunnel_pid() {
+    local app=$1
+    local env=$2
+    local pidfile="$FULCRUM_HOME/tunnels/${app}-${env}.pid"
+    if [ -f "$pidfile" ]; then
+        cat "$pidfile"
+    fi
+}
+
+tunnel_running() {
+    local app=$1
+    local env=$2
+    local pid=$(get_tunnel_pid "$app" "$env")
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+start_tunnel() {
+    local app=$1
+    local env=$2
+    local port=$3
+    local tunnel_type=${4:-quick}  # quick or named
+
+    mkdir -p "$FULCRUM_HOME/tunnels"
+    local pidfile="$FULCRUM_HOME/tunnels/${app}-${env}.pid"
+    local logfile="$LOGS_DIR/${app}-${env}-tunnel.log"
+    local urlfile="$FULCRUM_HOME/tunnels/${app}-${env}.url"
+    local config_backup="$FULCRUM_HOME/tunnels/${app}-${env}.config.backup"
+
+    if tunnel_running "$app" "$env"; then
+        log_warning "Tunnel already running"
+        if [ -f "$urlfile" ]; then
+            cat "$urlfile"
+        fi
+        return
+    fi
+
+    log_info "Starting $tunnel_type tunnel for $env on port $port..."
+
+    # Remove old URL file
+    rm -f "$urlfile"
+
+    if [ "$tunnel_type" == "quick" ]; then
+        # Quick tunnels need the config file moved out of the way
+        if [ -f "$HOME/.cloudflared/config.yml" ]; then
+            mv "$HOME/.cloudflared/config.yml" "$config_backup"
+        fi
+
+        # Start quick tunnel in background
+        cloudflared tunnel --url "http://localhost:$port" > "$logfile" 2>&1 &
+        echo $! > "$pidfile"
+
+        # Wait for URL to appear in logs
+        log_info "Waiting for tunnel URL..."
+        local timeout=30
+        local elapsed=0
+        while [ $elapsed -lt $timeout ]; do
+            if grep -q "https://.*trycloudflare.com" "$logfile"; then
+                sleep 0.5
+                local url=$(grep -o "https://[^ ]*trycloudflare.com" "$logfile" | head -1)
+                if [ -n "$url" ]; then
+                    echo "$url" > "$urlfile"
+                    log_success "Tunnel URL: $url"
+                    return
+                fi
+            fi
+            sleep 1
+            elapsed=$((elapsed + 1))
+        done
+
+        log_error "Timeout waiting for tunnel URL"
+        stop_tunnel "$app" "$env"
+        exit 1
+    else
+        # Named tunnel - restore config if needed
+        if [ -f "$config_backup" ]; then
+            mv "$config_backup" "$HOME/.cloudflared/config.yml"
+        fi
+
+        # Start named tunnel
+        cloudflared tunnel run > "$logfile" 2>&1 &
+        echo $! > "$pidfile"
+        sleep 2
+
+        if tunnel_running "$app" "$env"; then
+            log_success "Named tunnel started"
+        else
+            log_error "Failed to start named tunnel"
+            exit 1
+        fi
+    fi
+}
+
+stop_tunnel() {
+    local app=$1
+    local env=$2
+    local pidfile="$FULCRUM_HOME/tunnels/${app}-${env}.pid"
+    local urlfile="$FULCRUM_HOME/tunnels/${app}-${env}.url"
+    local config_backup="$FULCRUM_HOME/tunnels/${app}-${env}.config.backup"
+
+    if ! tunnel_running "$app" "$env"; then
+        log_warning "No tunnel running"
+        return
+    fi
+
+    local pid=$(get_tunnel_pid "$app" "$env")
+    log_info "Stopping tunnel..."
+    kill "$pid" 2>/dev/null
+    rm -f "$pidfile" "$urlfile"
+
+    # Restore config if this was a quick tunnel
+    if [ -f "$config_backup" ] && [ ! -f "$HOME/.cloudflared/config.yml" ]; then
+        mv "$config_backup" "$HOME/.cloudflared/config.yml"
+    fi
+
+    log_success "Tunnel stopped"
+}
+
+get_tunnel_url() {
+    local app=$1
+    local env=$2
+    local urlfile="$FULCRUM_HOME/tunnels/${app}-${env}.url"
+    if [ -f "$urlfile" ]; then
+        cat "$urlfile"
+    fi
+}
+
+container_status() {
+    local container=$1
+    if docker ps --filter "name=$container" --format "{{.Status}}" 2>/dev/null | grep -q "Up"; then
+        echo "running"
+    else
+        echo "stopped"
+    fi
+}
+
+start_container() {
+    local app=$1
+    local env=$2  # dev, test, or prod
+    
+    if ! app_exists "$app"; then
+        log_error "App '$app' not found. Run: fulcrum init $app"
+        exit 1
+    fi
+    
+    local app_path=$(get_app_config "$app" "path")
+    local port=$(get_app_config "$app" "${env}_port")
+    local container="${app}-${env}"
+    local image="${app}:${env}"
+    
+    if [ "$(container_status "$container")" == "running" ]; then
+        log_warning "$env environment already running"
+        log_success "http://localhost:$port"
+        return
+    fi
+    
+    log_info "Starting $app ($env) on port $port..."
+    
+    # Build image if it doesn't exist
+    if ! docker images "$image" --format "{{.Repository}}" | grep -q "$image"; then
+        log_info "Building image..."
+        docker build -t "$image" "$app_path" > "$LOGS_DIR/${app}-${env}-build.log" 2>&1
+    fi
+    
+    # Start container
+    docker run -d \
+        --name "$container" \
+        -p "$port:3000" \
+        "$image" > "$LOGS_DIR/${app}-${env}.log" 2>&1
+    
+    sleep 2
+    
+    if [ "$(container_status "$container")" == "running" ]; then
+        log_success "$env started: http://localhost:$port"
+    else
+        log_error "Failed to start $env"
+        exit 1
+    fi
+}
+
+stop_container() {
+    local app=$1
+    local env=$2
+    local container="${app}-${env}"
+    
+    if [ "$(container_status "$container")" == "stopped" ]; then
+        log_warning "$env not running"
+        return
+    fi
+    
+    log_info "Stopping $app ($env)..."
+    docker stop "$container" >/dev/null 2>&1
+    docker rm "$container" >/dev/null 2>&1
+    log_success "$env stopped"
+}
+
+rebuild_container() {
+    local app=$1
+    local env=$2
+    local app_path=$(get_app_config "$app" "path")
+    local image="${app}:${env}"
+    
+    log_info "Rebuilding $app ($env)..."
+    
+    # Stop if running
+    stop_container "$app" "$env" 2>/dev/null || true
+    
+    # Remove old image
+    docker rmi "$image" >/dev/null 2>&1 || true
+    
+    # Rebuild
+    docker build -t "$image" "$app_path" > "$LOGS_DIR/${app}-${env}-build.log" 2>&1
+    
+    # Start
+    start_container "$app" "$env"
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# App Commands
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_init() {
+    local app=$1
+    
+    if [ -z "$app" ]; then
+        log_error "Usage: fulcrum init <appname>"
+        exit 1
+    fi
+    
+    if app_exists "$app"; then
+        log_error "App '$app' already exists"
+        exit 1
+    fi
+    
+    local app_path=$(pwd)
+    
+    if [ ! -f "$app_path/Dockerfile" ]; then
+        log_error "No Dockerfile found in current directory"
+        exit 1
+    fi
+    
+    local base_port=$(get_next_port)
+    
+    init_registry
+    mkdir -p "$APPS_DIR/$app"
+    save_app_config "$app" "$app_path" "$base_port"
+    
+    log_success "Registered app: $app"
+    echo
+    echo "  Path: $app_path"
+    echo "  Dev port:  $base_port"
+    echo "  Test port: $((base_port + 1))"
+    echo "  Prod port: $((base_port + 2))"
+    echo
+    log_info "Next: fulcrum dev start"
+}
+
+cmd_list() {
+    init_registry
+    
+    echo
+    echo -e "${PURPLE}╔═══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${PURPLE}║${NC}                         ${CYAN}APPS${NC}                                       ${PURPLE}║${NC}"
+    echo -e "${PURPLE}╚═══════════════════════════════════════════════════════════════════╝${NC}"
+    echo
+    
+    if [ -z "$(ls -A "$APPS_DIR" 2>/dev/null)" ]; then
+        log_warning "No apps registered"
+        echo
+        log_info "Initialize an app: fulcrum init <appname>"
+        return
+    fi
+    
+    for app_dir in "$APPS_DIR"/*; do
+        if [ -d "$app_dir" ]; then
+            local app=$(basename "$app_dir")
+            local path=$(get_app_config "$app" "path")
+            local dev_port=$(get_app_config "$app" "dev_port")
+            
+            echo -e "${CYAN}$app${NC}"
+            echo "  Path: $path"
+            echo "  Dev:  $(container_status "${app}-dev")"
+            echo "  Test: $(container_status "${app}-test")"
+            echo "  Prod: $(container_status "${app}-prod")"
+            echo
+        fi
+    done
+}
+
+cmd_status() {
+    local app=$1
+    
+    init_registry
+    
+    if [ -n "$app" ]; then
+        # Show single app
+        if ! app_exists "$app"; then
+            log_error "App '$app' not found"
+            exit 1
+        fi
+        
+        echo
+        echo -e "${PURPLE}╔═══════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${PURPLE}║${NC}                    ${CYAN}$app${NC}                                       ${PURPLE}║${NC}"
+        echo -e "${PURPLE}╚═══════════════════════════════════════════════════════════════════╝${NC}"
+        echo
+        
+        local dev_port=$(get_app_config "$app" "dev_port")
+        local test_port=$(get_app_config "$app" "test_port")
+        local prod_port=$(get_app_config "$app" "prod_port")
+        
+        echo -e "${CYAN}Development:${NC}"
+        local dev_status=$(container_status "${app}-dev")
+        if [ "$dev_status" == "running" ]; then
+            echo -e "  Status: ${GREEN}Running${NC}"
+            echo -e "  URL:    ${CYAN}http://localhost:$dev_port${NC}"
+        else
+            echo -e "  Status: ${YELLOW}Stopped${NC}"
+        fi
+        
+        echo
+        echo -e "${CYAN}Test:${NC}"
+        local test_status=$(container_status "${app}-test")
+        if [ "$test_status" == "running" ]; then
+            echo -e "  Status: ${GREEN}Running${NC}"
+            echo -e "  Local:  ${CYAN}http://localhost:$test_port${NC}"
+            local test_url=$(get_tunnel_url "$app" "test")
+            if [ -n "$test_url" ]; then
+                echo -e "  Tunnel: ${GREEN}$test_url${NC}"
+            fi
+        else
+            echo -e "  Status: ${YELLOW}Stopped${NC}"
+        fi
+        
+        echo
+        echo -e "${CYAN}Production:${NC}"
+        local prod_status=$(container_status "${app}-prod")
+        if [ "$prod_status" == "running" ]; then
+            echo -e "  Status: ${GREEN}Running${NC}"
+            echo -e "  Local:  ${CYAN}http://localhost:$prod_port${NC}"
+            local prod_url=$(get_tunnel_url "$app" "prod")
+            if [ -n "$prod_url" ]; then
+                echo -e "  Tunnel: ${GREEN}$prod_url${NC}"
+            elif [ -f "$HOME/.cloudflared/config.yml" ]; then
+                echo -e "  Tunnel: ${GREEN}app.twoclocks.ai${NC} (named tunnel)"
+            fi
+        else
+            echo -e "  Status: ${YELLOW}Stopped${NC}"
+        fi
+        echo
+    else
+        # Show all apps
+        cmd_list
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Environment Commands
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_dev() {
+    local action=$1
+    local app=$2
+
+    # Auto-detect app if not provided
+    if [ -z "$app" ]; then
+        app=$(detect_app_from_pwd)
+        if [ -z "$app" ]; then
+            log_error "No app specified and could not detect app from current directory"
+            echo "Usage: fulcrum dev $action <app>"
+            echo "Or run from an app directory"
+            exit 1
+        fi
+    fi
+
+    case "$action" in
+        start)   start_container "$app" "dev" ;;
+        stop)    stop_container "$app" "dev" ;;
+        rebuild) rebuild_container "$app" "dev" ;;
+        logs)    docker logs "${app}-dev" ${3:+-f} ;;
+        *)
+            log_error "Unknown dev command: $action"
+            echo "Available: start, stop, rebuild, logs"
+            exit 1
+            ;;
+    esac
+}
+
+cmd_test() {
+    local action=$1
+    local app=$2
+
+    # Auto-detect app if not provided
+    if [ -z "$app" ]; then
+        app=$(detect_app_from_pwd)
+        if [ -z "$app" ]; then
+            log_error "No app specified and could not detect app from current directory"
+            echo "Usage: fulcrum test $action <app>"
+            echo "Or run from an app directory"
+            exit 1
+        fi
+    fi
+
+    case "$action" in
+        start)
+            start_container "$app" "test"
+            local test_port=$(get_app_config "$app" "test_port")
+            start_tunnel "$app" "test" "$test_port" "quick"
+            ;;
+        stop)
+            stop_tunnel "$app" "test"
+            stop_container "$app" "test"
+            ;;
+        *)
+            log_error "Unknown test command: $action"
+            echo "Available: start, stop"
+            exit 1
+            ;;
+    esac
+}
+
+cmd_prod() {
+    local action=$1
+    local app=$2
+
+    # Auto-detect app if not provided
+    if [ -z "$app" ]; then
+        app=$(detect_app_from_pwd)
+        if [ -z "$app" ]; then
+            log_error "No app specified and could not detect app from current directory"
+            echo "Usage: fulcrum prod $action <app>"
+            echo "Or run from an app directory"
+            exit 1
+        fi
+    fi
+
+    case "$action" in
+        start)
+            start_container "$app" "prod"
+            local prod_port=$(get_app_config "$app" "prod_port")
+            # Check if named tunnel config exists
+            if [ -f "$HOME/.cloudflared/config.yml" ]; then
+                log_info "Using named tunnel configuration"
+                start_tunnel "$app" "prod" "$prod_port" "named"
+            else
+                log_warning "No named tunnel config found, using quick tunnel"
+                start_tunnel "$app" "prod" "$prod_port" "quick"
+            fi
+            ;;
+        stop)
+            stop_tunnel "$app" "prod"
+            stop_container "$app" "prod"
+            ;;
+        *)
+            log_error "Unknown prod command: $action"
+            echo "Available: start, stop"
+            exit 1
+            ;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Help
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_help() {
+    cat <<EOF
+
+╔═══════════════════════════════════════════════════════════════════╗
+║                         FULCRUM 2.0                                ║
+║              Multi-App Container Orchestrator                      ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+Usage: fulcrum <command> [args...]
+
+APP MANAGEMENT:
+  init <app>              Register current directory as app
+  list                    List all apps
+  status [app]            Show status (all apps or specific)
+
+DEVELOPMENT:
+  dev start <app>         Start dev environment
+  dev stop <app>          Stop dev environment
+  dev rebuild <app>       Rebuild dev environment
+  dev logs <app> [live]   View dev logs
+
+TESTING:
+  test start <app>        Start test environment + quick tunnel
+  test stop <app>         Stop test environment + tunnel
+
+PRODUCTION:
+  prod start <app>        Start production + tunnel (named or quick)
+  prod stop <app>         Stop production + tunnel
+
+WORKFLOW:
+  1. fulcrum init myapp           # Register app
+  2. fulcrum dev start myapp      # Start development (local only)
+  3. fulcrum test start myapp     # Start test + get temporary URL
+  4. fulcrum prod start myapp     # Start production + public URL
+
+Each app gets 3 independent containers:
+  - myapp-dev  (port X)        - Local development
+  - myapp-test (port X+1)      - Testing with cloudflare tunnel
+  - myapp-prod (port X+2)      - Production with tunnel
+
+EOF
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════════
+
+case "${1:-}" in
+    init)     cmd_init "$2" ;;
+    list)     cmd_list ;;
+    status)   cmd_status "$2" ;;
+    dev)      cmd_dev "$2" "$3" "$4" ;;
+    test)     cmd_test "$2" "$3" ;;
+    prod)     cmd_prod "$2" "$3" ;;
+    help|--help|-h|"") cmd_help ;;
+    version)  echo "Fulcrum v$VERSION" ;;
+    *)
+        log_error "Unknown command: $1"
+        echo "Run 'fulcrum help' for usage"
+        exit 1
+        ;;
+esac

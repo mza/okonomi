@@ -1,0 +1,3 @@
+#!/bin/bash
+cmd="~/.local/bin/ai speed"
+exec setsid uwsm-app -- alacritty --class=Imagine -e bash -c "$cmd"

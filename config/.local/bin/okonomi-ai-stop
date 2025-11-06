@@ -1,0 +1,5 @@
+#!/bin/bash
+# Stop AI infrastructure services
+
+echo "Stopping AI infrastructure..."
+~/.local/bin/ai stop

@@ -1,0 +1,5 @@
+#!/bin/bash
+# Real-time AI token activity log
+# Usage: okonomi-ai-log
+
+~/.local/bin/ai log

@@ -1,0 +1,22 @@
+#!/bin/bash
+# Helper: List available models
+# Usage: ai models
+
+set -e
+
+echo "═══════════════════════════════════════════════════════════════"
+echo "                    Available Models                            "
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+
+echo "Local Models (Ollama):"
+docker exec ollama ollama list 2>/dev/null || echo "  Ollama not running"
+
+echo ""
+echo "Available via LiteLLM (http://localhost:4000):"
+curl -s -H "Authorization: Bearer 79c2ff4d0288cc8b158bf56fdb8d23fe1b9417e3378d80aa8b9bb1d5cdf90374" \
+    http://localhost:4000/v1/models 2>/dev/null | \
+    jq -r '.data[].id' 2>/dev/null | \
+    sed 's/^/  /' || echo "  LiteLLM not running"
+
+echo ""

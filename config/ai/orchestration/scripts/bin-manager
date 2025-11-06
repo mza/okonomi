@@ -1,0 +1,353 @@
+#!/bin/bash
+# Bin Manager - Manage utility applications/scripts
+# Usage: ai bin <command> [args]
+
+set -e
+
+REGISTRY_FILE="${HOME}/.config/ai/bins/registry.json"
+BINS_DIR="${HOME}/.local/share/ai/bins"
+INSTALL_DIR="${HOME}/.local/bin"
+
+# Colors
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Ensure registry exists
+if [ ! -f "$REGISTRY_FILE" ]; then
+    mkdir -p "$(dirname "$REGISTRY_FILE")"
+    echo '{"version":"1.0","bins":{}}' > "$REGISTRY_FILE"
+fi
+
+# Ensure bins dir exists
+mkdir -p "$BINS_DIR"
+
+show_help() {
+    echo -e "${BLUE}Bin Manager - Utility Application Registry${NC}"
+    echo ""
+    echo "Usage: ai bin <command> [args]"
+    echo ""
+    echo -e "${GREEN}Commands:${NC}"
+    echo "  list              List all registered bins"
+    echo "  add <name>        Add a new bin (interactive)"
+    echo "  remove <name>     Remove a bin"
+    echo "  info <name>       Show bin information"
+    echo "  update <name>     Update bin metadata"
+    echo "  install <name>    Symlink bin to ~/.local/bin"
+    echo "  uninstall <name>  Remove bin symlink"
+    echo ""
+}
+
+bin_list() {
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}                    Registered Bins                            ${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    local bins=$(jq -r '.bins | keys[]' "$REGISTRY_FILE" 2>/dev/null)
+
+    if [ -z "$bins" ]; then
+        echo "No bins registered yet."
+        echo ""
+        echo "Add a bin with: ai bin add <name>"
+        return
+    fi
+
+    printf "%-20s %-10s %-15s %s\n" "NAME" "VERSION" "STATUS" "DESCRIPTION"
+    echo "────────────────────────────────────────────────────────────────"
+
+    for bin_name in $bins; do
+        local version=$(jq -r ".bins.\"$bin_name\".version // \"unknown\"" "$REGISTRY_FILE")
+        local description=$(jq -r ".bins.\"$bin_name\".description // \"\"" "$REGISTRY_FILE")
+        local bin_path="$BINS_DIR/$bin_name"
+        local status="missing"
+
+        if [ -f "$bin_path" ] && [ -x "$bin_path" ]; then
+            if [ -L "$INSTALL_DIR/$bin_name" ]; then
+                status="${GREEN}installed${NC}"
+            else
+                status="${YELLOW}available${NC}"
+            fi
+        fi
+
+        printf "%-20s %-10s %-24s %s\n" "$bin_name" "$version" "$(echo -e "$status")" "$description"
+    done
+
+    echo ""
+}
+
+bin_add() {
+    local bin_name="$1"
+
+    if [ -z "$bin_name" ]; then
+        echo -e "${RED}Error: Bin name required${NC}"
+        echo "Usage: ai bin add <name>"
+        exit 1
+    fi
+
+    # Check if already exists
+    if jq -e ".bins.\"$bin_name\"" "$REGISTRY_FILE" > /dev/null 2>&1; then
+        echo -e "${YELLOW}Bin '$bin_name' already registered${NC}"
+        echo "Use 'ai bin update $bin_name' to modify it"
+        exit 1
+    fi
+
+    echo -e "${BLUE}Adding new bin: $bin_name${NC}"
+    echo ""
+
+    # Collect metadata
+    read -p "Version [1.0.0]: " version
+    version=${version:-1.0.0}
+
+    read -p "Description: " description
+
+    read -p "Author: " author
+    author=${author:-$(whoami)}
+
+    # Get source file
+    echo ""
+    echo "Source options:"
+    echo "  1) Create new script"
+    echo "  2) Import existing file"
+    read -p "Choice [1]: " source_choice
+    source_choice=${source_choice:-1}
+
+    bin_path="$BINS_DIR/$bin_name"
+
+    if [ "$source_choice" = "1" ]; then
+        # Create new script template
+        cat > "$bin_path" <<'EOF'
+#!/bin/bash
+# Auto-generated bin script
+
+set -e
+
+echo "Hello from BIN_NAME!"
+echo "Edit this script at: ~/.local/share/ai/bins/BIN_NAME"
+EOF
+        sed -i "s/BIN_NAME/$bin_name/g" "$bin_path"
+        chmod +x "$bin_path"
+        echo -e "${GREEN}✓ Created template at $bin_path${NC}"
+    else
+        read -p "Path to existing script: " source_path
+        if [ ! -f "$source_path" ]; then
+            echo -e "${RED}Error: File not found: $source_path${NC}"
+            exit 1
+        fi
+        cp "$source_path" "$bin_path"
+        chmod +x "$bin_path"
+        echo -e "${GREEN}✓ Copied to $bin_path${NC}"
+    fi
+
+    # Add to registry
+    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    jq ".bins.\"$bin_name\" = {
+        \"version\": \"$version\",
+        \"description\": \"$description\",
+        \"author\": \"$author\",
+        \"created\": \"$timestamp\",
+        \"updated\": \"$timestamp\",
+        \"path\": \"$bin_path\"
+    }" "$REGISTRY_FILE" > "${REGISTRY_FILE}.tmp"
+    mv "${REGISTRY_FILE}.tmp" "$REGISTRY_FILE"
+
+    echo -e "${GREEN}✓ Registered $bin_name${NC}"
+    echo ""
+    echo "Next steps:"
+    echo "  1. Edit: $bin_path"
+    echo "  2. Install: ai bin install $bin_name"
+}
+
+bin_remove() {
+    local bin_name="$1"
+
+    if [ -z "$bin_name" ]; then
+        echo -e "${RED}Error: Bin name required${NC}"
+        echo "Usage: ai bin remove <name>"
+        exit 1
+    fi
+
+    if ! jq -e ".bins.\"$bin_name\"" "$REGISTRY_FILE" > /dev/null 2>&1; then
+        echo -e "${RED}Error: Bin '$bin_name' not found${NC}"
+        exit 1
+    fi
+
+    echo -e "${YELLOW}Removing bin: $bin_name${NC}"
+
+    # Uninstall if installed
+    if [ -L "$INSTALL_DIR/$bin_name" ]; then
+        rm "$INSTALL_DIR/$bin_name"
+        echo -e "${GREEN}✓ Uninstalled from $INSTALL_DIR${NC}"
+    fi
+
+    # Remove file
+    local bin_path="$BINS_DIR/$bin_name"
+    if [ -f "$bin_path" ]; then
+        rm "$bin_path"
+        echo -e "${GREEN}✓ Removed $bin_path${NC}"
+    fi
+
+    # Remove from registry
+    jq "del(.bins.\"$bin_name\")" "$REGISTRY_FILE" > "${REGISTRY_FILE}.tmp"
+    mv "${REGISTRY_FILE}.tmp" "$REGISTRY_FILE"
+
+    echo -e "${GREEN}✓ Removed from registry${NC}"
+}
+
+bin_info() {
+    local bin_name="$1"
+
+    if [ -z "$bin_name" ]; then
+        echo -e "${RED}Error: Bin name required${NC}"
+        echo "Usage: ai bin info <name>"
+        exit 1
+    fi
+
+    if ! jq -e ".bins.\"$bin_name\"" "$REGISTRY_FILE" > /dev/null 2>&1; then
+        echo -e "${RED}Error: Bin '$bin_name' not found${NC}"
+        exit 1
+    fi
+
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}                    Bin Info: $bin_name${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    jq -r ".bins.\"$bin_name\" | to_entries[] | \"\(.key): \(.value)\"" "$REGISTRY_FILE"
+
+    echo ""
+    local bin_path="$BINS_DIR/$bin_name"
+    if [ -f "$bin_path" ]; then
+        echo "File exists: ✓"
+        echo "Executable: $([ -x "$bin_path" ] && echo "✓" || echo "✗")"
+        echo "Size: $(stat -f%z "$bin_path" 2>/dev/null || stat -c%s "$bin_path" 2>/dev/null) bytes"
+    else
+        echo "File exists: ✗"
+    fi
+
+    if [ -L "$INSTALL_DIR/$bin_name" ]; then
+        echo "Installed: ✓ ($INSTALL_DIR/$bin_name)"
+    else
+        echo "Installed: ✗"
+    fi
+
+    echo ""
+}
+
+bin_install() {
+    local bin_name="$1"
+
+    if [ -z "$bin_name" ]; then
+        echo -e "${RED}Error: Bin name required${NC}"
+        echo "Usage: ai bin install <name>"
+        exit 1
+    fi
+
+    local bin_path="$BINS_DIR/$bin_name"
+
+    if [ ! -f "$bin_path" ]; then
+        echo -e "${RED}Error: Bin file not found: $bin_path${NC}"
+        exit 1
+    fi
+
+    if [ -L "$INSTALL_DIR/$bin_name" ]; then
+        echo -e "${YELLOW}Already installed: $INSTALL_DIR/$bin_name${NC}"
+        return
+    fi
+
+    ln -sf "$bin_path" "$INSTALL_DIR/$bin_name"
+    echo -e "${GREEN}✓ Installed $bin_name to $INSTALL_DIR${NC}"
+    echo ""
+    echo "You can now run: $bin_name"
+}
+
+bin_uninstall() {
+    local bin_name="$1"
+
+    if [ -z "$bin_name" ]; then
+        echo -e "${RED}Error: Bin name required${NC}"
+        echo "Usage: ai bin uninstall <name>"
+        exit 1
+    fi
+
+    if [ ! -L "$INSTALL_DIR/$bin_name" ]; then
+        echo -e "${YELLOW}Not installed: $bin_name${NC}"
+        return
+    fi
+
+    rm "$INSTALL_DIR/$bin_name"
+    echo -e "${GREEN}✓ Uninstalled $bin_name${NC}"
+}
+
+bin_update() {
+    local bin_name="$1"
+
+    if [ -z "$bin_name" ]; then
+        echo -e "${RED}Error: Bin name required${NC}"
+        echo "Usage: ai bin update <name>"
+        exit 1
+    fi
+
+    if ! jq -e ".bins.\"$bin_name\"" "$REGISTRY_FILE" > /dev/null 2>&1; then
+        echo -e "${RED}Error: Bin '$bin_name' not found${NC}"
+        exit 1
+    fi
+
+    echo -e "${BLUE}Updating bin: $bin_name${NC}"
+    echo ""
+
+    local current_version=$(jq -r ".bins.\"$bin_name\".version" "$REGISTRY_FILE")
+    local current_desc=$(jq -r ".bins.\"$bin_name\".description" "$REGISTRY_FILE")
+
+    read -p "Version [$current_version]: " version
+    version=${version:-$current_version}
+
+    read -p "Description [$current_desc]: " description
+    description=${description:-$current_desc}
+
+    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    jq ".bins.\"$bin_name\".version = \"$version\" |
+        .bins.\"$bin_name\".description = \"$description\" |
+        .bins.\"$bin_name\".updated = \"$timestamp\"" \
+        "$REGISTRY_FILE" > "${REGISTRY_FILE}.tmp"
+    mv "${REGISTRY_FILE}.tmp" "$REGISTRY_FILE"
+
+    echo -e "${GREEN}✓ Updated $bin_name${NC}"
+}
+
+# Main command router
+case "$1" in
+    list|ls)
+        bin_list
+        ;;
+    add)
+        bin_add "$2"
+        ;;
+    remove|rm)
+        bin_remove "$2"
+        ;;
+    info)
+        bin_info "$2"
+        ;;
+    install)
+        bin_install "$2"
+        ;;
+    uninstall)
+        bin_uninstall "$2"
+        ;;
+    update)
+        bin_update "$2"
+        ;;
+    help|--help|-h|"")
+        show_help
+        ;;
+    *)
+        echo -e "${RED}Unknown command: $1${NC}"
+        echo ""
+        show_help
+        exit 1
+        ;;
+esac

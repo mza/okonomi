@@ -1,0 +1,183 @@
+#!/bin/bash
+# Create a new bin using AI, register it, and install it
+# Usage: okonomi-ai-create-bin [model]
+
+set -e
+
+# Colors
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Get model (optional first argument, or use default from config)
+if [ -z "$1" ]; then
+    DEFAULT_MODEL=$(~/.local/bin/ai model get 2>/dev/null || echo "gpt-oss")
+    MODEL="$DEFAULT_MODEL"
+else
+    MODEL="$1"
+fi
+
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}           Okonomi AI - Create Bin Wizard                      ${NC}"
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo ""
+echo -e "${YELLOW}Using model: ${MODEL}${NC}"
+echo ""
+
+# Get description of what to build (only input needed)
+echo "What should this bin do?"
+echo -n "Description: "
+read -r DESCRIPTION
+
+if [ -z "$DESCRIPTION" ]; then
+    echo -e "${RED}Error: Description required${NC}"
+    exit 1
+fi
+
+# Create work directory
+WORK_DIR="/tmp/okonomi-ai-bin-$$"
+mkdir -p "$WORK_DIR"
+cd "$WORK_DIR"
+
+echo ""
+echo -e "${BLUE}Step 1: Running AI agent to create the bin...${NC}"
+echo "Task: $DESCRIPTION"
+echo ""
+
+# Build the agent prompt - let AI choose the bin name
+AGENT_PROMPT="Create a bash utility script that $DESCRIPTION.
+
+Requirements:
+- Choose an appropriate, short, memorable name for this utility (e.g., 'json-fmt', 'git-sync', 'db-backup')
+- Create a file named '<your-chosen-name>' (no .sh extension)
+- Must be a standalone executable bash script
+- Start with #!/bin/bash shebang
+- Include 'set -e' for error handling
+- Add helpful comments at the top explaining what it does
+- Include a --help flag that explains usage
+- Include a --version flag showing v1.0.0
+- Make it production-ready with proper error messages
+- Output should be clean and user-friendly
+- Handle edge cases gracefully
+
+Create the script file with the name you choose."
+
+# Run the agent
+~/.local/bin/ai agent "$MODEL" "$AGENT_PROMPT"
+
+echo ""
+echo -e "${GREEN}✓ Agent completed${NC}"
+echo ""
+
+# Find the generated script (look for executable files or .sh files)
+GENERATED_FILE=$(find "$WORK_DIR" -type f \( -executable -o -name "*.sh" \) ! -name ".*" | head -1)
+
+if [ -z "$GENERATED_FILE" ] || [ ! -f "$GENERATED_FILE" ]; then
+    echo -e "${YELLOW}Looking for any script files...${NC}"
+    GENERATED_FILE=$(find "$WORK_DIR" -type f ! -name ".*" | head -1)
+fi
+
+if [ -z "$GENERATED_FILE" ] || [ ! -f "$GENERATED_FILE" ]; then
+    echo -e "${RED}Error: Could not find generated script${NC}"
+    echo "Files in work directory:"
+    ls -la "$WORK_DIR"
+    exit 1
+fi
+
+# Extract the bin name from the generated filename
+BIN_NAME=$(basename "$GENERATED_FILE" .sh)
+
+echo -e "${BLUE}Step 2: Registering bin...${NC}"
+echo ""
+echo -e "${GREEN}AI chose the name: ${BIN_NAME}${NC}"
+echo ""
+
+# Prepare the file
+chmod +x "$GENERATED_FILE"
+
+# Show preview
+echo "Generated script preview:"
+echo "────────────────────────────────────────────────────────────────"
+head -20 "$GENERATED_FILE"
+echo "..."
+echo "────────────────────────────────────────────────────────────────"
+echo ""
+
+read -p "Looks good? [Y/n]: " CONFIRM
+CONFIRM=${CONFIRM:-Y}
+
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    echo -e "${YELLOW}Cancelled. Generated file at: $GENERATED_FILE${NC}"
+    exit 0
+fi
+
+# Version is always 1.0.0 for new bins
+VERSION="1.0.0"
+
+# Copy to bins directory
+BINS_DIR="${HOME}/.local/share/ai/bins"
+mkdir -p "$BINS_DIR"
+cp "$GENERATED_FILE" "$BINS_DIR/$BIN_NAME"
+chmod +x "$BINS_DIR/$BIN_NAME"
+
+# Register it
+REGISTRY_FILE="${HOME}/.config/ai/bins/registry.json"
+if [ ! -f "$REGISTRY_FILE" ]; then
+    mkdir -p "$(dirname "$REGISTRY_FILE")"
+    echo '{"version":"1.0","bins":{}}' > "$REGISTRY_FILE"
+fi
+
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+AUTHOR=$(whoami)
+
+# Add to registry using jq
+jq ".bins.\"$BIN_NAME\" = {
+    \"version\": \"$VERSION\",
+    \"description\": \"$DESCRIPTION\",
+    \"author\": \"$AUTHOR\",
+    \"created\": \"$TIMESTAMP\",
+    \"updated\": \"$TIMESTAMP\",
+    \"path\": \"$BINS_DIR/$BIN_NAME\",
+    \"generated_by\": \"okonomi-ai\",
+    \"model\": \"$MODEL\"
+}" "$REGISTRY_FILE" > "${REGISTRY_FILE}.tmp"
+mv "${REGISTRY_FILE}.tmp" "$REGISTRY_FILE"
+
+echo -e "${GREEN}✓ Registered $BIN_NAME${NC}"
+echo ""
+
+echo -e "${BLUE}Step 3: Installing bin to PATH...${NC}"
+
+# Install it
+INSTALL_DIR="${HOME}/.local/bin"
+ln -sf "$BINS_DIR/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
+
+echo -e "${GREEN}✓ Installed $BIN_NAME to $INSTALL_DIR${NC}"
+echo ""
+
+# Cleanup work directory
+rm -rf "$WORK_DIR"
+
+# Summary
+echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}                    Success!                                   ${NC}"
+echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+echo ""
+echo "Bin '$BIN_NAME' has been created, registered, and installed!"
+echo ""
+echo "Try it now:"
+echo "  $BIN_NAME --help"
+echo "  $BIN_NAME --version"
+echo ""
+echo "Bin details:"
+echo "  Location: $BINS_DIR/$BIN_NAME"
+echo "  Installed: $INSTALL_DIR/$BIN_NAME"
+echo "  Version: $VERSION"
+echo ""
+echo "Manage with:"
+echo "  ai bin info $BIN_NAME"
+echo "  ai bin update $BIN_NAME"
+echo "  ai bin remove $BIN_NAME"
+echo ""

@@ -1,0 +1,283 @@
+#!/bin/bash
+
+# Interactive script to add new models to the system
+# Handles both local (Ollama) and cloud models
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ORCHESTRATION_DIR="$(dirname "$SCRIPT_DIR")"
+AI_CONFIG_DIR="${HOME}/.config/ai"
+CONFIG_FILE="${AI_CONFIG_DIR}/platform/litellm/litellm_config.yaml"
+ENV_FILE="${AI_CONFIG_DIR}/platform/litellm/.env"
+
+# Colors
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}                    Add Model to System                        ${NC}"
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo ""
+
+# Step 1: Choose model type
+echo -e "${GREEN}What type of model do you want to add?${NC}"
+echo "  1) Local Ollama model (runs on your machine)"
+echo "  2) Cloud model (OpenAI, Anthropic, etc.)"
+echo ""
+read -p "Enter choice [1 or 2]: " model_type
+
+case $model_type in
+    1)
+        # LOCAL OLLAMA MODEL
+        echo ""
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${BLUE}                    Add Ollama Model                           ${NC}"
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+
+        # Show popular models
+        echo -e "${YELLOW}Popular models:${NC}"
+        echo "  llama3.2:3b      - Meta's latest (small, fast)"
+        echo "  mistral:7b       - Great all-around performance"
+        echo "  phi3:3.8b        - Microsoft's compact model"
+        echo "  codellama:13b    - Specialized for coding"
+        echo "  gemma2:2b        - Google's efficient model"
+        echo ""
+        echo "See all: https://ollama.com/library"
+        echo ""
+
+        read -p "Enter model name (e.g., llama3.2:3b): " ollama_model
+
+        # Validate input
+        if [ -z "$ollama_model" ]; then
+            echo -e "${RED}Error: Model name cannot be empty${NC}"
+            exit 1
+        fi
+
+        # Extract base name for LiteLLM (remove :tag)
+        model_base_name="${ollama_model%%:*}"
+
+        read -p "Enter a friendly name for LiteLLM (default: $model_base_name): " friendly_name
+        friendly_name=${friendly_name:-$model_base_name}
+
+        echo ""
+        echo -e "${YELLOW}Does this model support function calling?${NC}"
+        echo "(Most modern models do - llama3+, mistral, etc.)"
+        read -p "Enable function calling? [Y/n]: " supports_functions
+        supports_functions=${supports_functions:-Y}
+
+        # Pull the model
+        echo ""
+        echo -e "${BLUE}Pulling model from Ollama...${NC}"
+        docker exec -it ollama ollama pull "$ollama_model"
+
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Failed to pull model${NC}"
+            exit 1
+        fi
+
+        echo -e "${GREEN}✓ Model pulled successfully${NC}"
+        echo ""
+
+        # Add to config
+        echo -e "${BLUE}Adding to LiteLLM config...${NC}"
+
+        # Create the YAML entry
+        if [[ "$supports_functions" =~ ^[Yy]$ ]]; then
+            function_calling="true"
+        else
+            function_calling="false"
+        fi
+
+        # Find the line with "# Anthropic models (remote)" and insert before it
+        temp_file=$(mktemp)
+        awk -v model="$friendly_name" -v ollama_model="$ollama_model" -v func_calling="$function_calling" '
+        /# Anthropic models \(remote\)/ {
+            print "  - model_name: " model
+            print "    litellm_params:"
+            print "      model: ollama_chat/" ollama_model
+            print "      api_base: http://localhost:11434"
+            print "    model_info:"
+            print "      supports_function_calling: " func_calling
+            print ""
+        }
+        { print }
+        ' "$CONFIG_FILE" > "$temp_file"
+
+        mv "$temp_file" "$CONFIG_FILE"
+
+        echo -e "${GREEN}✓ Added to config${NC}"
+
+        # Restart LiteLLM
+        echo ""
+        echo -e "${BLUE}Restarting LiteLLM...${NC}"
+        cd "$ORCHESTRATION_DIR" && make stop-platform > /dev/null 2>&1
+        sleep 2
+        cd "$ORCHESTRATION_DIR" && make start-platform > /dev/null 2>&1
+
+        echo -e "${GREEN}✓ LiteLLM restarted${NC}"
+        echo ""
+
+        # Verify
+        echo -e "${BLUE}Verifying model is available...${NC}"
+        sleep 3
+
+        health_check=$(curl -s -H "Authorization: Bearer 79c2ff4d0288cc8b158bf56fdb8d23fe1b9417e3378d80aa8b9bb1d5cdf90374" \
+            http://localhost:4000/health)
+
+        if echo "$health_check" | grep -q "\"model\":\"ollama_chat/$ollama_model\""; then
+            echo -e "${GREEN}✓ Model is available and healthy!${NC}"
+        else
+            echo -e "${YELLOW}⚠ Model added but may need time to initialize${NC}"
+        fi
+
+        echo ""
+        echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${GREEN}Success! Model added to the system${NC}"
+        echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "Use in your code with: ${YELLOW}model: '$friendly_name'${NC}"
+        echo ""
+        ;;
+
+    2)
+        # CLOUD MODEL
+        echo ""
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${BLUE}                    Add Cloud Model                            ${NC}"
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+
+        echo -e "${GREEN}Choose provider:${NC}"
+        echo "  1) OpenAI (gpt-4, gpt-3.5-turbo, etc.)"
+        echo "  2) Anthropic (already configured - use this to add more Claude models)"
+        echo "  3) Google Gemini"
+        echo "  4) Cohere"
+        echo "  5) Other/Custom"
+        echo ""
+        read -p "Enter choice [1-5]: " provider_choice
+
+        case $provider_choice in
+            1)
+                provider="openai"
+                env_var="OPENAI_API_KEY"
+                echo ""
+                echo -e "${YELLOW}Popular OpenAI models:${NC}"
+                echo "  gpt-4o"
+                echo "  gpt-4-turbo"
+                echo "  gpt-3.5-turbo"
+                read -p "Enter model name: " model_name
+                litellm_model="$model_name"
+                ;;
+            2)
+                provider="anthropic"
+                env_var="ANTHROPIC_API_KEY"
+                echo ""
+                echo -e "${YELLOW}Anthropic models:${NC}"
+                echo "  claude-sonnet-4-5 (already configured)"
+                echo "  claude-haiku-4-5 (already configured)"
+                echo "  claude-opus-4-1 (already configured)"
+                echo "  claude-3-5-sonnet-20241022"
+                read -p "Enter model name: " model_name
+                litellm_model="$model_name"
+                ;;
+            3)
+                provider="gemini"
+                env_var="GEMINI_API_KEY"
+                echo ""
+                echo -e "${YELLOW}Google Gemini models:${NC}"
+                echo "  gemini-pro"
+                echo "  gemini-pro-vision"
+                read -p "Enter model name: " model_name
+                litellm_model="gemini/$model_name"
+                ;;
+            4)
+                provider="cohere"
+                env_var="COHERE_API_KEY"
+                echo ""
+                echo -e "${YELLOW}Cohere models:${NC}"
+                echo "  command-r"
+                echo "  command-r-plus"
+                read -p "Enter model name: " model_name
+                litellm_model="$model_name"
+                ;;
+            5)
+                read -p "Enter provider name: " provider
+                read -p "Enter environment variable for API key: " env_var
+                read -p "Enter model name: " model_name
+                read -p "Enter LiteLLM model string: " litellm_model
+                ;;
+            *)
+                echo -e "${RED}Invalid choice${NC}"
+                exit 1
+                ;;
+        esac
+
+        read -p "Enter friendly name for LiteLLM (default: $model_name): " friendly_name
+        friendly_name=${friendly_name:-$model_name}
+
+        # Check if API key is already in .env
+        if ! grep -q "^$env_var=" "$ENV_FILE" 2>/dev/null; then
+            echo ""
+            echo -e "${YELLOW}API key not found in .env${NC}"
+            read -sp "Enter your $provider API key (or press Enter to skip): " api_key
+            echo ""
+
+            if [ -n "$api_key" ]; then
+                echo "" >> "$ENV_FILE"
+                echo "$env_var=$api_key" >> "$ENV_FILE"
+                echo -e "${GREEN}✓ API key added to .env${NC}"
+            else
+                echo -e "${YELLOW}⚠ Skipped API key - add it manually to $ENV_FILE${NC}"
+            fi
+        else
+            echo -e "${GREEN}✓ API key already configured${NC}"
+        fi
+
+        # Add to config
+        echo ""
+        echo -e "${BLUE}Adding to LiteLLM config...${NC}"
+
+        temp_file=$(mktemp)
+        awk -v model="$friendly_name" -v litellm_model="$litellm_model" -v env_var="$env_var" '
+        /# General settings/ {
+            print "  - model_name: " model
+            print "    litellm_params:"
+            print "      model: " litellm_model
+            print "      api_key: os.environ/" env_var
+            print ""
+        }
+        { print }
+        ' "$CONFIG_FILE" > "$temp_file"
+
+        mv "$temp_file" "$CONFIG_FILE"
+
+        echo -e "${GREEN}✓ Added to config${NC}"
+
+        # Restart LiteLLM
+        echo ""
+        echo -e "${BLUE}Restarting LiteLLM...${NC}"
+        cd "$ORCHESTRATION_DIR" && make stop-platform > /dev/null 2>&1
+        sleep 2
+        cd "$ORCHESTRATION_DIR" && make start-platform > /dev/null 2>&1
+
+        echo -e "${GREEN}✓ LiteLLM restarted${NC}"
+        echo ""
+
+        echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${GREEN}Success! Model added to the system${NC}"
+        echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "Use in your code with: ${YELLOW}model: '$friendly_name'${NC}"
+        echo ""
+        ;;
+
+    *)
+        echo -e "${RED}Invalid choice${NC}"
+        exit 1
+        ;;
+esac

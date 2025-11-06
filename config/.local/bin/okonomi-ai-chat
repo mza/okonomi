@@ -1,0 +1,17 @@
+#!/bin/bash
+# Quick chat with AI assistant for Okonomi development
+# Usage: okonomi-ai-chat [model]
+
+# Get default model if not specified
+if [ -z "$1" ]; then
+    DEFAULT_MODEL=$(~/.local/bin/ai model get 2>/dev/null || echo "gpt-oss")
+    MODEL="$DEFAULT_MODEL"
+else
+    MODEL="$1"
+fi
+
+echo "Starting Okonomi AI chat session with $MODEL..."
+echo "Type your questions about Okonomi development."
+echo ""
+
+~/.local/bin/ai chat "$MODEL"

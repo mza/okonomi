@@ -1,0 +1,3 @@
+#!/bin/bash
+cmd="~/.local/bin/ai odo; echo; read -n1 -p 'Press any key to close...'"
+exec setsid uwsm-app -- alacritty --class=Imagine -e bash -c "$cmd"

@@ -1,0 +1,14 @@
+#!/bin/bash
+# Start AI infrastructure services for Okonomi development
+
+set -e
+
+echo "Starting AI infrastructure for Okonomi..."
+
+# Start AI services using the ai command
+if ! ~/.local/bin/ai status > /dev/null 2>&1; then
+    ~/.local/bin/ai start
+else
+    echo "AI services already running"
+    ~/.local/bin/ai status
+fi

@@ -1,0 +1,229 @@
+#!/bin/bash
+# Manage AI token usage odometer
+# Usage: odometer-manager [show|reset|add]
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+METRICS_DIR="${HOME}/.local/share/ai/metrics"
+ODOMETER_FILE="${METRICS_DIR}/odometer.json"
+
+# Initialize odometer if it doesn't exist
+initialize_odometer() {
+    if [ ! -f "$ODOMETER_FILE" ]; then
+        mkdir -p "$METRICS_DIR"
+        cat > "$ODOMETER_FILE" <<'EOF'
+{
+  "trip": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "reset_at": null,
+    "models": {}
+  },
+  "lifetime": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "started_at": null,
+    "models": {}
+  }
+}
+EOF
+        # Set started_at to now
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        jq ".lifetime.started_at = \"$TIMESTAMP\" | .trip.reset_at = \"$TIMESTAMP\"" \
+            "$ODOMETER_FILE" > "${ODOMETER_FILE}.tmp"
+        mv "${ODOMETER_FILE}.tmp" "$ODOMETER_FILE"
+    fi
+
+    # Migrate old format if needed
+    if ! jq -e '.trip.models' "$ODOMETER_FILE" > /dev/null 2>&1; then
+        jq '.trip.models = {} | .lifetime.models = {}' "$ODOMETER_FILE" > "${ODOMETER_FILE}.tmp"
+        mv "${ODOMETER_FILE}.tmp" "$ODOMETER_FILE"
+    fi
+}
+
+# Add tokens to odometer
+add_tokens() {
+    local input_tokens="$1"
+    local output_tokens="$2"
+    local model="${3:-unknown}"
+    local duration="${4:-0}"
+    local total_tokens=$((input_tokens + output_tokens))
+
+    initialize_odometer
+
+    # Update both trip and lifetime (overall and per-model)
+    jq --arg input "$input_tokens" \
+       --arg output "$output_tokens" \
+       --arg total "$total_tokens" \
+       --arg model "$model" \
+       '
+       .trip.input_tokens += ($input | tonumber) |
+       .trip.output_tokens += ($output | tonumber) |
+       .trip.total_tokens += ($total | tonumber) |
+       .trip.models[$model].input_tokens = ((.trip.models[$model].input_tokens // 0) + ($input | tonumber)) |
+       .trip.models[$model].output_tokens = ((.trip.models[$model].output_tokens // 0) + ($output | tonumber)) |
+       .trip.models[$model].total_tokens = ((.trip.models[$model].total_tokens // 0) + ($total | tonumber)) |
+       .lifetime.input_tokens += ($input | tonumber) |
+       .lifetime.output_tokens += ($output | tonumber) |
+       .lifetime.total_tokens += ($total | tonumber) |
+       .lifetime.models[$model].input_tokens = ((.lifetime.models[$model].input_tokens // 0) + ($input | tonumber)) |
+       .lifetime.models[$model].output_tokens = ((.lifetime.models[$model].output_tokens // 0) + ($output | tonumber)) |
+       .lifetime.models[$model].total_tokens = ((.lifetime.models[$model].total_tokens // 0) + ($total | tonumber))
+       ' "$ODOMETER_FILE" > "${ODOMETER_FILE}.tmp"
+    mv "${ODOMETER_FILE}.tmp" "$ODOMETER_FILE"
+
+    # Also log to speedometer file for real-time viewing
+    SPEEDOMETER_LOG="${METRICS_DIR}/speedometer.log"
+    TIMESTAMP=$(date +"%H:%M:%S")
+    echo "$TIMESTAMP|$model|$input_tokens|$output_tokens|$total_tokens|$duration" >> "$SPEEDOMETER_LOG"
+}
+
+# Format number with thousands separators
+format_number() {
+    printf "%'d" "$1" 2>/dev/null || echo "$1"
+}
+
+# Show odometer
+show_odometer() {
+    initialize_odometer
+
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}                    AI Token Odometer                          ${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    # Read odometer data
+    trip_input=$(jq -r '.trip.input_tokens' "$ODOMETER_FILE")
+    trip_output=$(jq -r '.trip.output_tokens' "$ODOMETER_FILE")
+    trip_total=$(jq -r '.trip.total_tokens' "$ODOMETER_FILE")
+    trip_reset=$(jq -r '.trip.reset_at' "$ODOMETER_FILE")
+
+    lifetime_input=$(jq -r '.lifetime.input_tokens' "$ODOMETER_FILE")
+    lifetime_output=$(jq -r '.lifetime.output_tokens' "$ODOMETER_FILE")
+    lifetime_total=$(jq -r '.lifetime.total_tokens' "$ODOMETER_FILE")
+    lifetime_started=$(jq -r '.lifetime.started_at' "$ODOMETER_FILE")
+
+    echo -e "${GREEN}Trip Odometer${NC} (resettable)"
+    echo "  Total: $(format_number $trip_total) tokens (in: $(format_number $trip_input), out: $(format_number $trip_output))"
+
+    # Show per-model breakdown for trip
+    trip_models=$(jq -r '.trip.models | keys[]' "$ODOMETER_FILE" 2>/dev/null)
+    if [ -n "$trip_models" ]; then
+        echo ""
+        echo "  By model:"
+        while IFS= read -r model; do
+            if [ -n "$model" ]; then
+                model_input=$(jq -r ".trip.models[\"$model\"].input_tokens" "$ODOMETER_FILE")
+                model_output=$(jq -r ".trip.models[\"$model\"].output_tokens" "$ODOMETER_FILE")
+                model_total=$(jq -r ".trip.models[\"$model\"].total_tokens" "$ODOMETER_FILE")
+                printf "    %-20s %10s (in: %8s, out: %8s)\n" \
+                    "$model" \
+                    "$(format_number $model_total)" \
+                    "$(format_number $model_input)" \
+                    "$(format_number $model_output)"
+            fi
+        done <<< "$trip_models"
+    fi
+
+    if [ "$trip_reset" != "null" ]; then
+        echo ""
+        echo "  Reset at: $trip_reset"
+    fi
+    echo ""
+
+    echo -e "${YELLOW}Lifetime Odometer${NC} (all-time)"
+    echo "  Total: $(format_number $lifetime_total) tokens (in: $(format_number $lifetime_input), out: $(format_number $lifetime_output))"
+
+    # Show per-model breakdown for lifetime
+    lifetime_models=$(jq -r '.lifetime.models | keys[]' "$ODOMETER_FILE" 2>/dev/null)
+    if [ -n "$lifetime_models" ]; then
+        echo ""
+        echo "  By model:"
+        while IFS= read -r model; do
+            if [ -n "$model" ]; then
+                model_input=$(jq -r ".lifetime.models[\"$model\"].input_tokens" "$ODOMETER_FILE")
+                model_output=$(jq -r ".lifetime.models[\"$model\"].output_tokens" "$ODOMETER_FILE")
+                model_total=$(jq -r ".lifetime.models[\"$model\"].total_tokens" "$ODOMETER_FILE")
+                printf "    %-20s %10s (in: %8s, out: %8s)\n" \
+                    "$model" \
+                    "$(format_number $model_total)" \
+                    "$(format_number $model_input)" \
+                    "$(format_number $model_output)"
+            fi
+        done <<< "$lifetime_models"
+    fi
+
+    if [ "$lifetime_started" != "null" ]; then
+        echo ""
+        echo "  Started at: $lifetime_started"
+    fi
+    echo ""
+}
+
+# Reset trip odometer
+reset_trip() {
+    initialize_odometer
+
+    TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    jq '
+    .trip.input_tokens = 0 |
+    .trip.output_tokens = 0 |
+    .trip.total_tokens = 0 |
+    .trip.models = {} |
+    .trip.reset_at = $timestamp
+    ' --arg timestamp "$TIMESTAMP" "$ODOMETER_FILE" > "${ODOMETER_FILE}.tmp"
+    mv "${ODOMETER_FILE}.tmp" "$ODOMETER_FILE"
+
+    echo -e "${GREEN}✓ Trip odometer reset${NC}"
+}
+
+# Show usage
+show_usage() {
+    echo "Usage: ai odo [command]"
+    echo ""
+    echo "Commands:"
+    echo "  show             Show odometer readings (default)"
+    echo "  reset            Reset trip odometer"
+    echo "  add <in> <out>   Add tokens (internal use)"
+    echo ""
+    echo "Examples:"
+    echo "  ai odo           # Show current readings"
+    echo "  ai odo reset     # Reset trip odometer"
+}
+
+# Main
+COMMAND="${1:-show}"
+
+case "$COMMAND" in
+    show)
+        show_odometer
+        ;;
+    reset)
+        reset_trip
+        ;;
+    add)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo -e "${RED}Error: add requires input and output token counts${NC}"
+            exit 1
+        fi
+        add_tokens "$2" "$3" "$4" "$5"
+        ;;
+    help|--help|-h)
+        show_usage
+        ;;
+    *)
+        echo -e "${RED}Error: Unknown command: $COMMAND${NC}"
+        echo ""
+        show_usage
+        exit 1
+        ;;
+esac

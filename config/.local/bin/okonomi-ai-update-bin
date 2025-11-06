@@ -1,0 +1,12 @@
+#!/bin/bash
+# Update bin metadata (version, description)
+# Usage: okonomi-ai-update-bin <bin-name>
+
+if [ -z "$1" ]; then
+    echo "Usage: okonomi-ai-update-bin <bin-name>"
+    echo ""
+    echo "Example: okonomi-ai-update-bin my-tool"
+    exit 1
+fi
+
+~/.local/bin/ai bin update "$1"

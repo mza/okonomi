@@ -1,0 +1,15 @@
+#!/bin/bash
+# Run a coding agent on Okonomi project
+# Usage: okonomi-ai-agent [model] [prompt]
+#        okonomi-ai-agent [prompt]  (uses default model)
+
+set -e
+
+# Ensure AI services are running
+~/.local/bin/ai status > /dev/null 2>&1 || ~/.local/bin/ai start
+
+echo "Running Okonomi coding agent..."
+
+# Pass all arguments through to the agent helper
+# It will handle model selection and prompt logic
+~/.local/bin/ai agent "$@"

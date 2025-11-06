@@ -1,5 +1,5 @@
 * {
-  font-family: monospace;
+  font-family: JetBrainsMono Nerd Font, monospace;
   font-size: 12pt;
   color: #cdd6f4;
 }
@@ -33,27 +33,3 @@ window#waybar {
   background: rgba(255, 255, 255, 0.05);
 }
 
-/* AI Widget Styling */
-
-#custom-ai {
-  padding: 0 10px;
-  margin: 0 5px;
-  border-radius: 5px;
-  color: #6752a1;
-}
-
-
-/* Normal state */
-#custom-ai.normal {
-}
-
-/* Live request - red with animation */
-#custom-ai.live {
-  color: #d0d0d0;  /* Catppuccin red */
-}
-
-/* Hover effect */
-#custom-ai:hover {
-  background-color: #4e4170;
-  color: #d0d0d0;
-}

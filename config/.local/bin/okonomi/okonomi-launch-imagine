@@ -1,0 +1,2 @@
+#!/bin/bash
+exec setsid uwsm app -- "alacritty" --class=Imagine -e okonomi-cmd-imagine "$@"

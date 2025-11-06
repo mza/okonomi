@@ -1,0 +1,12 @@
+#!/bin/bash
+# Install a bin to PATH
+# Usage: okonomi-ai-install-bin <bin-name>
+
+if [ -z "$1" ]; then
+    echo "Usage: okonomi-ai-install-bin <bin-name>"
+    echo ""
+    echo "Example: okonomi-ai-install-bin my-tool"
+    exit 1
+fi
+
+~/.local/bin/ai bin install "$1"

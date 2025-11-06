@@ -1,0 +1,44 @@
+#!/bin/bash
+# Helper: Run a coding agent with LiteLLM
+# Usage: ai agent [model] [prompt]
+
+set -e
+
+# Get default model if not specified
+if [ -z "$1" ]; then
+    DEFAULT_MODEL=$(~/.local/bin/ai model get 2>/dev/null || echo "gpt-oss")
+    MODEL="$DEFAULT_MODEL"
+else
+    MODEL="$1"
+fi
+
+# If no prompt provided, prompt for it interactively
+if [ -z "$2" ]; then
+    echo "What would you like the agent to do?"
+    echo -n "Prompt: "
+    read -r PROMPT
+    if [ -z "$PROMPT" ]; then
+        echo "Error: No prompt provided"
+        exit 1
+    fi
+else
+    # Shift first arg and take rest as prompt
+    shift
+    PROMPT="$*"
+fi
+
+AGENT_DIR="/home/mza/src/agents/claude"
+
+if [ ! -f "$AGENT_DIR/litellm_agent.ts" ]; then
+    echo "Error: Agent not found at $AGENT_DIR/litellm_agent.ts"
+    exit 1
+fi
+
+echo ""
+echo "Running coding agent..."
+echo "Model: $MODEL"
+echo "Task: $PROMPT"
+echo ""
+
+cd "$AGENT_DIR"
+npx tsx litellm_agent.ts "$MODEL" "$PROMPT"

@@ -1,0 +1,12 @@
+#!/bin/bash
+# Show detailed information about a bin
+# Usage: okonomi-ai-bin-info <bin-name>
+
+if [ -z "$1" ]; then
+    echo "Usage: okonomi-ai-bin-info <bin-name>"
+    echo ""
+    echo "Example: okonomi-ai-bin-info my-tool"
+    exit 1
+fi
+
+~/.local/bin/ai bin info "$1"

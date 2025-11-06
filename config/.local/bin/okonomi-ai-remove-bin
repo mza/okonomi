@@ -1,0 +1,12 @@
+#!/bin/bash
+# Remove a bin from the registry
+# Usage: okonomi-ai-remove-bin <bin-name>
+
+if [ -z "$1" ]; then
+    echo "Usage: okonomi-ai-remove-bin <bin-name>"
+    echo ""
+    echo "Example: okonomi-ai-remove-bin my-tool"
+    exit 1
+fi
+
+~/.local/bin/ai bin remove "$1"

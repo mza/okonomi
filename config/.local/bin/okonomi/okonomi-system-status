@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# Quick system status check for all okonomi services
+# Run this anytime to see what's running
+
+echo ""
+echo "═══════════════════════════════════════════════════════════════════"
+echo "  OKONOMI SYSTEM STATUS"
+echo "═══════════════════════════════════════════════════════════════════"
+echo ""
+
+# Check systemd services
+echo "SYSTEMD SERVICES:"
+systemctl --user is-active webapp-prod.service >/dev/null 2>&1 && \
+    echo "  ✓ webapp-prod.service       [ACTIVE]" || \
+    echo "  ✗ webapp-prod.service       [INACTIVE]"
+
+systemctl --user is-active cloudflared-webapp.service >/dev/null 2>&1 && \
+    echo "  ✓ cloudflared-webapp.service [ACTIVE]" || \
+    echo "  ✗ cloudflared-webapp.service [INACTIVE]"
+
+echo ""
+echo "DOCKER CONTAINERS:"
+docker ps --filter "name=webapp" --format "  ✓ {{.Names}}\t\t[{{.Status}}]" 2>/dev/null || echo "  ✗ No webapp containers running"
+
+echo ""
+echo "NETWORK SERVICES:"
+if curl -s -o /dev/null -w "%{http_code}" http://localhost:3005/ | grep -q "200"; then
+    echo "  ✓ Webapp (localhost:3005)    [RESPONDING]"
+else
+    echo "  ✗ Webapp (localhost:3005)    [NOT RESPONDING]"
+fi
+
+if pgrep -f "cloudflared tunnel run" >/dev/null 2>&1; then
+    echo "  ✓ Cloudflared Tunnel         [RUNNING]"
+    echo "    → https://www.twoclocks.ai"
+    echo "    → https://ssh.twoclocks.ai"
+else
+    echo "  ✗ Cloudflared Tunnel         [NOT RUNNING]"
+fi
+
+echo ""
+echo "QUICK COMMANDS:"
+echo "  systemctl --user status webapp-prod"
+echo "  systemctl --user status cloudflared-webapp"
+echo "  okonomi-app status webapp"
+echo "  docker logs webapp-prod"
+echo ""

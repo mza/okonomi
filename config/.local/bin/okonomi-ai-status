@@ -1,0 +1,4 @@
+#!/bin/bash
+# Check AI infrastructure status for Okonomi
+
+~/.local/bin/ai status

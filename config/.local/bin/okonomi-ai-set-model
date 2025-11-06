@@ -1,0 +1,15 @@
+#!/bin/bash
+# Set the default AI model
+# Usage: okonomi-ai-set-model <model-name>
+
+if [ -z "$1" ]; then
+    echo "Usage: okonomi-ai-set-model <model-name>"
+    echo ""
+    echo "Example: okonomi-ai-set-model claude-sonnet-4-5"
+    echo ""
+    echo "Available models:"
+    ~/.local/bin/ai model list
+    exit 1
+fi
+
+~/.local/bin/ai model set "$1"

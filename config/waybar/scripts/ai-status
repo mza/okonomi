@@ -1,0 +1,118 @@
+#!/bin/bash
+# Waybar AI Status Widget
+# Outputs JSON for Waybar to display AI token usage
+
+set -e
+
+METRICS_DIR="${HOME}/.local/share/ai/metrics"
+ODOMETER_FILE="${METRICS_DIR}/odometer.json"
+
+# Check if we have any data
+if [ ! -f "$ODOMETER_FILE" ]; then
+    # No data yet - show inactive state
+    echo '{"text": " idle", "class": "idle", "tooltip": "No AI activity yet"}'
+    exit 0
+fi
+
+# Read trip totals
+TRIP_TOTAL=$(jq -r '.trip.total_tokens // 0' "$ODOMETER_FILE")
+
+# Format tokens with K/M suffix
+format_tokens() {
+    local tokens=$1
+    if [ "$tokens" -ge 1000000 ]; then
+        echo "$(awk "BEGIN {printf \"%.1fM\", $tokens / 1000000}")"
+    elif [ "$tokens" -ge 1000 ]; then
+        echo "$(awk "BEGIN {printf \"%.1fK\", $tokens / 1000}")"
+    else
+        echo "$tokens"
+    fi
+}
+
+TRIP_FORMATTED=$(format_tokens $TRIP_TOTAL)
+
+# Check for live request
+LIVE_REQUEST=$(ls /tmp/ai_live_request_* 2>/dev/null | head -1)
+if [ -n "$LIVE_REQUEST" ] && [ -f "$LIVE_REQUEST" ]; then
+    # Check if file is stale (not modified in last 10 seconds)
+    FILE_AGE=$(( $(date +%s) - $(stat -c %Y "$LIVE_REQUEST" 2>/dev/null || echo 0) ))
+    if [ "$FILE_AGE" -gt 10 ]; then
+        # File is stale - clean it up and ignore
+        rm -f "$LIVE_REQUEST" 2>/dev/null || true
+        LIVE_REQUEST=""
+    fi
+fi
+
+if [ -n "$LIVE_REQUEST" ] && [ -f "$LIVE_REQUEST" ]; then
+    # We have a live request!
+    IFS='|' read -r live_model live_start live_in live_out live_total live_elapsed < "$LIVE_REQUEST"
+
+    if [ -n "$live_model" ] && [ -n "$live_elapsed" ]; then
+        # Check if we're in "thinking" phase (no tokens yet)
+        if [ "$live_total" -eq 0 ]; then
+            # Thinking phase - request sent but no tokens generated yet
+            TEXT="${live_model} thinking..."
+            CLASS="live"
+            TOOLTIP="THINKING\nModel: ${live_model}\nElapsed: ${live_elapsed}s\n\nTrip Total: ${TRIP_FORMATTED}"
+        else
+            # Calculate current rate
+            RATE=0
+            if [ "$live_elapsed" != "0" ] && [ "$live_total" -gt 0 ]; then
+                RATE=$(awk -v total="$live_total" -v elapsed="$live_elapsed" 'BEGIN {printf "%d", total / elapsed}')
+            fi
+
+            # Show live status with lightning indicator
+            TEXT="${live_model} - ${live_total} tk | ${RATE} tk/s"
+            CLASS="live"
+            TOOLTIP="LIVE REQUEST\nModel: ${live_model}\nElapsed: ${live_elapsed}s\n\nTrip Total: ${TRIP_FORMATTED}"
+        fi
+    else
+        # Live file exists but no data - fall through to detailed display
+        TEXT="${TRIP_FORMATTED}"
+        CLASS="normal"
+
+        # Build detailed tooltip
+        LIFETIME_TOTAL=$(jq -r '.lifetime.total_tokens // 0' "$ODOMETER_FILE")
+        LIFETIME_FORMATTED=$(format_tokens $LIFETIME_TOTAL)
+
+        # Get per-model breakdown for tooltip
+        MODELS=$(jq -r '.trip.models | to_entries[] | "\(.key): \(.value.total_tokens)"' "$ODOMETER_FILE" 2>/dev/null || echo "")
+
+        TOOLTIP="Trip: ${TRIP_FORMATTED}\nLifetime: ${LIFETIME_FORMATTED}"
+        if [ -n "$MODELS" ]; then
+            TOOLTIP="${TOOLTIP}\n\nBy model:"
+            while IFS=: read -r model tokens; do
+                TOOLTIP="${TOOLTIP}\n  ${model}: $(format_tokens $tokens)"
+            done <<< "$MODELS"
+        fi
+    fi
+else
+    # No live request - show trip total
+    if [ "$TRIP_TOTAL" -eq 0 ]; then
+        TEXT="idle"
+        CLASS="idle"
+        TOOLTIP="No AI activity in this trip"
+    else
+        TEXT="T ${TRIP_FORMATTED}"
+        CLASS="normal"
+
+        # Build detailed tooltip
+        LIFETIME_TOTAL=$(jq -r '.lifetime.total_tokens // 0' "$ODOMETER_FILE")
+        LIFETIME_FORMATTED=$(format_tokens $LIFETIME_TOTAL)
+
+        # Get per-model breakdown for tooltip
+        MODELS=$(jq -r '.trip.models | to_entries[] | "\(.key): \(.value.total_tokens)"' "$ODOMETER_FILE" 2>/dev/null || echo "")
+
+        TOOLTIP="Trip: ${TRIP_FORMATTED}\nLifetime: ${LIFETIME_FORMATTED}"
+        if [ -n "$MODELS" ]; then
+            TOOLTIP="${TOOLTIP}\n\nBy model:"
+            while IFS=: read -r model tokens; do
+                TOOLTIP="${TOOLTIP}\n  ${model}: $(format_tokens $tokens)"
+            done <<< "$MODELS"
+        fi
+    fi
+fi
+
+# Output JSON for Waybar
+# The \n in tooltip will be rendered as line breaks
+echo "{\"text\": \"$TEXT\", \"class\": \"$CLASS\", \"tooltip\": \"$TOOLTIP\"}"

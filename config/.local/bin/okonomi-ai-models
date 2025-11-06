@@ -1,0 +1,4 @@
+#!/bin/bash
+# List available AI models (deprecated - use okonomi-ai-list-models)
+
+~/.local/bin/ai model list

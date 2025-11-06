@@ -1,0 +1,5 @@
+#!/bin/bash
+# Show the current default AI model
+# Usage: okonomi-ai-get-model
+
+~/.local/bin/ai model get

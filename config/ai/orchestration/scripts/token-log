@@ -1,0 +1,57 @@
+#!/bin/bash
+# Real-time token usage log viewer
+# Usage: token-log
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+METRICS_DIR="${HOME}/.local/share/ai/metrics"
+SPEEDOMETER_LOG="${METRICS_DIR}/speedometer.log"
+
+# Initialize
+mkdir -p "$METRICS_DIR"
+touch "$SPEEDOMETER_LOG"
+
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}                   AI Token Activity Log                       ${NC}"
+echo -e "${BLUE}                   (Real-time Stream)                          ${NC}"
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo ""
+echo -e "${CYAN}Monitoring token usage... Press Ctrl+C to exit${NC}"
+echo ""
+
+# Track session totals
+session_input=0
+session_output=0
+session_requests=0
+
+# Function to format numbers
+format_number() {
+    printf "%'d" "$1" 2>/dev/null || printf "%d" "$1"
+}
+
+# Display existing entries (last 10)
+if [ -s "$SPEEDOMETER_LOG" ]; then
+    tail -10 "$SPEEDOMETER_LOG" | while IFS='|' read -r timestamp model input output total; do
+        printf "${GREEN}%s${NC} | Model: ${YELLOW}%-20s${NC} | In: ${CYAN}%7s${NC} | Out: ${CYAN}%7s${NC} | Total: ${CYAN}%7s${NC}\n" \
+            "$timestamp" "$model" "$(format_number $input)" "$(format_number $output)" "$(format_number $total)"
+    done
+fi
+
+# Tail the log file for new entries
+tail -f -n 0 "$SPEEDOMETER_LOG" | while IFS='|' read -r timestamp model input output total; do
+    # Update session totals
+    session_input=$((session_input + input))
+    session_output=$((session_output + output))
+    session_requests=$((session_requests + 1))
+
+    # Display the entry
+    printf "${GREEN}%s${NC} | Model: ${YELLOW}%-20s${NC} | In: ${CYAN}%7s${NC} | Out: ${CYAN}%7s${NC} | Total: ${CYAN}%7s${NC}\n" \
+        "$timestamp" "$model" "$(format_number $input)" "$(format_number $output)" "$(format_number $total)"
+done

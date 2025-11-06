@@ -1,0 +1,182 @@
+#!/bin/bash
+
+# System management CLI
+# Wrapper around Makefile for convenience
+
+set -e
+
+# Resolve symlinks to find the actual script location
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -h "$SCRIPT_PATH" ]; do
+    SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    [[ $SCRIPT_PATH != /* ]] && SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
+ORCHESTRATION_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Colors
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+show_help() {
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}                    sys - System Manager                       ${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "Usage: sys <command>"
+    echo ""
+    echo -e "${GREEN}Commands:${NC}"
+    echo "  start           Start all services (infra + platform)"
+    echo "  stop            Stop all services"
+    echo "  restart         Restart all services"
+    echo "  status          Show service status"
+    echo "  logs [service]  View logs (ollama, litellm, or all)"
+    echo ""
+    echo "  start-infra     Start infrastructure layer only"
+    echo "  start-platform  Start platform layer only"
+    echo "  stop-infra      Stop infrastructure layer"
+    echo "  stop-platform   Stop platform layer"
+    echo ""
+    echo "  clean           Remove all containers and volumes"
+    echo "  help            Show this help message"
+    echo ""
+    echo -e "${GREEN}Model Management:${NC}"
+    echo "  model get       Show current default model"
+    echo "  model set       Set default model"
+    echo "  model list      List all available models"
+    echo "  add-model       Add a new model (interactive wizard)"
+    echo ""
+    echo -e "${GREEN}Bin Management:${NC}"
+    echo "  bin list        List registered utility bins"
+    echo "  bin add         Add a new bin"
+    echo "  bin remove      Remove a bin"
+    echo "  bin install     Install bin to PATH"
+    echo "  bin info        Show bin details"
+    echo ""
+    echo -e "${GREEN}Token Usage Tracking:${NC}"
+    echo "  odo             Show token usage odometer"
+    echo "  odo reset       Reset trip odometer"
+    echo "  speed           Real-time token speedometer (tokens/sec by model)"
+    echo "  log             Token activity log (real-time stream)"
+    echo ""
+
+    # List available helpers
+    HELPERS_DIR="$(dirname "$ORCHESTRATION_DIR")/helpers"
+    if [ -d "$HELPERS_DIR" ] && [ "$(ls -A "$HELPERS_DIR" 2>/dev/null)" ]; then
+        echo -e "${GREEN}Task Helpers:${NC}"
+        for helper in "$HELPERS_DIR"/*; do
+            if [ -x "$helper" ]; then
+                helper_name=$(basename "$helper")
+                # Extract description from second line of helper (if it's a comment)
+                desc=$(sed -n '2s/^# Helper: //p' "$helper" 2>/dev/null || echo "")
+                if [ -n "$desc" ]; then
+                    printf "  %-15s %s\n" "$helper_name" "$desc"
+                else
+                    echo "  $helper_name"
+                fi
+            fi
+        done
+        echo ""
+    fi
+
+    echo -e "${YELLOW}Examples:${NC}"
+    echo "  ai start              # Start everything"
+    echo "  ai status             # Check what's running"
+    echo "  ai models             # List available models"
+    echo "  ai chat               # Interactive chat"
+    echo "  ai add-model          # Add a new model"
+    echo ""
+}
+
+run_make() {
+    cd "$ORCHESTRATION_DIR" && make "$@"
+}
+
+case "$1" in
+    start)
+        run_make start-all
+        ;;
+    stop)
+        run_make stop-all
+        ;;
+    restart)
+        run_make restart-all
+        ;;
+    status)
+        run_make status
+        ;;
+    logs)
+        if [ -z "$2" ]; then
+            run_make logs-all
+        elif [ "$2" = "ollama" ]; then
+            run_make logs-infra
+        elif [ "$2" = "litellm" ]; then
+            run_make logs-platform
+        else
+            echo -e "${RED}Unknown service: $2${NC}"
+            echo "Available services: ollama, litellm"
+            exit 1
+        fi
+        ;;
+    start-infra)
+        run_make start-infra
+        ;;
+    start-platform)
+        run_make start-platform
+        ;;
+    stop-infra)
+        run_make stop-infra
+        ;;
+    stop-platform)
+        run_make stop-platform
+        ;;
+    add-model)
+        "$SCRIPT_DIR/add-model"
+        ;;
+    model)
+        shift  # Remove 'model' from arguments
+        "$SCRIPT_DIR/model-manager" "$@"
+        ;;
+    bin)
+        shift  # Remove 'bin' from arguments
+        "$SCRIPT_DIR/bin-manager" "$@"
+        ;;
+    odo|odometer)
+        shift  # Remove 'odo' from arguments
+        "$SCRIPT_DIR/odometer-manager" "$@"
+        ;;
+    speed|speedometer)
+        "$SCRIPT_DIR/speedometer"
+        ;;
+    log)
+        "$SCRIPT_DIR/token-log"
+        ;;
+    clean)
+        run_make clean
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    "")
+        show_help
+        ;;
+    *)
+        # Check if it's a helper script
+        HELPERS_DIR="$(dirname "$ORCHESTRATION_DIR")/helpers"
+        HELPER_SCRIPT="$HELPERS_DIR/$1"
+
+        if [ -f "$HELPER_SCRIPT" ] && [ -x "$HELPER_SCRIPT" ]; then
+            shift  # Remove the helper name from arguments
+            exec "$HELPER_SCRIPT" "$@"
+        else
+            echo -e "${RED}Unknown command: $1${NC}"
+            echo ""
+            show_help
+            exit 1
+        fi
+        ;;
+esac

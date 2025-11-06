@@ -1,0 +1,175 @@
+#!/bin/bash
+# Real-time token usage speedometer showing avg/max/min speeds
+# Usage: speedometer
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+METRICS_DIR="${HOME}/.local/share/ai/metrics"
+SPEEDOMETER_LOG="${METRICS_DIR}/speedometer.log"
+
+# Initialize
+mkdir -p "$METRICS_DIR"
+touch "$SPEEDOMETER_LOG"
+
+# Time window in seconds for stats
+WINDOW=30
+
+# Function to format numbers
+format_number() {
+    printf "%'d" "$1" 2>/dev/null || printf "%d" "$1"
+}
+
+# Function to calculate speeds from log
+calculate_speeds() {
+    local now=$(date +%s)
+    local cutoff=$((now - WINDOW))
+
+    # Arrays to store speeds per model
+    declare -A model_speeds
+    declare -A model_count
+    declare -A model_max
+    declare -A model_min
+
+    if [ -f "$SPEEDOMETER_LOG" ]; then
+        while IFS='|' read -r timestamp model input output total duration; do
+            # Skip if no duration
+            if [ -z "$duration" ] || [ "$duration" = "0" ]; then
+                continue
+            fi
+
+            # Convert HH:MM:SS to seconds since midnight
+            local hour=$(echo "$timestamp" | cut -d: -f1)
+            local min=$(echo "$timestamp" | cut -d: -f2)
+            local sec=$(echo "$timestamp" | cut -d: -f3)
+            local entry_seconds=$((10#$hour * 3600 + 10#$min * 60 + 10#$sec))
+
+            # Get current time in seconds since midnight
+            local now_seconds=$(date +%s)
+            local now_midnight=$(date -d "00:00:00" +%s)
+            local current_seconds=$((now_seconds - now_midnight))
+
+            # Check if within window
+            local diff=$((current_seconds - entry_seconds))
+            if [ $diff -lt 0 ]; then
+                diff=$((diff + 86400))
+            fi
+
+            if [ $diff -le $WINDOW ]; then
+                # Calculate tokens per second for this request
+                local speed_int=$(awk "BEGIN {printf \"%d\", $total / $duration}")
+
+                # Accumulate for average
+                model_speeds[$model]=$((${model_speeds[$model]:-0} + speed_int))
+                model_count[$model]=$((${model_count[$model]:-0} + 1))
+
+                # Track max
+                if [ -z "${model_max[$model]}" ] || [ "$speed_int" -gt "${model_max[$model]}" ]; then
+                    model_max[$model]=$speed_int
+                fi
+
+                # Track min
+                if [ -z "${model_min[$model]}" ] || [ "$speed_int" -lt "${model_min[$model]}" ]; then
+                    model_min[$model]=$speed_int
+                fi
+            fi
+        done < "$SPEEDOMETER_LOG"
+    fi
+
+    # Print header
+    clear
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}        AI Token Speedometer (tokens/sec per request)          ${NC}"
+    echo -e "${BLUE}            Last ${WINDOW}s - $(date +'%H:%M:%S')                              ${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    # Check for live request
+    LIVE_REQUEST=$(ls /tmp/ai_live_request_* 2>/dev/null | head -1)
+    if [ -n "$LIVE_REQUEST" ] && [ -f "$LIVE_REQUEST" ]; then
+        IFS='|' read -r live_model live_start live_in live_out live_total live_elapsed < "$LIVE_REQUEST"
+        if [ -n "$live_model" ] && [ -n "$live_elapsed" ]; then
+            local live_rate=0
+            if [ "$live_elapsed" != "0" ] && [ "$live_total" -gt 0 ]; then
+                live_rate=$(awk -v total="$live_total" -v elapsed="$live_elapsed" 'BEGIN {printf "%d", total / elapsed}')
+            fi
+
+            echo -e "${RED}🔴 LIVE REQUEST${NC}"
+            echo -e "Model: ${YELLOW}$live_model${NC}"
+            echo -e "Tokens: ${CYAN}~$live_total${NC} (estimated output)"
+            echo -e "Elapsed: ${CYAN}${live_elapsed}s${NC}"
+            if [ "$live_rate" -gt 0 ]; then
+                echo -e "Rate: ${GREEN}$(format_number $live_rate) tok/s${NC}"
+            fi
+            echo ""
+            echo -e "${YELLOW}Recent completed requests:${NC}"
+            echo ""
+        fi
+    fi
+
+    printf "${CYAN}%-25s %10s %10s %10s %8s${NC}\n" "Model" "Avg/sec" "Max/sec" "Min/sec" "Requests"
+    echo "───────────────────────────────────────────────────────────────"
+
+    local total_avg=0
+    local total_max=0
+    local total_min=999999
+    local total_requests=0
+
+    # Print stats for each model
+    for model in "${!model_count[@]}"; do
+        local count=${model_count[$model]}
+        local avg=$((${model_speeds[$model]} / count))
+        local max=${model_max[$model]}
+        local min=${model_min[$model]}
+
+        total_avg=$((total_avg + avg * count))
+        total_requests=$((total_requests + count))
+
+        if [ "$max" -gt "$total_max" ]; then
+            total_max=$max
+        fi
+        if [ "$min" -lt "$total_min" ]; then
+            total_min=$min
+        fi
+
+        printf "${YELLOW}%-25s${NC} ${GREEN}%10s${NC} ${GREEN}%10s${NC} ${GREEN}%10s${NC} ${CYAN}%8s${NC}\n" \
+            "$model" \
+            "$(format_number $avg)" \
+            "$(format_number $max)" \
+            "$(format_number $min)" \
+            "$count"
+    done
+
+    # Print total
+    if [ ${#model_count[@]} -gt 0 ]; then
+        echo "───────────────────────────────────────────────────────────────"
+        local overall_avg=$((total_avg / total_requests))
+        printf "${CYAN}%-25s${NC} ${GREEN}%10s${NC} ${GREEN}%10s${NC} ${GREEN}%10s${NC} ${CYAN}%8s${NC}\n" \
+            "Overall" \
+            "$(format_number $overall_avg)" \
+            "$(format_number $total_max)" \
+            "$(format_number $total_min)" \
+            "$total_requests"
+    else
+        echo -e "${YELLOW}No activity in the last ${WINDOW} seconds${NC}"
+    fi
+
+    echo ""
+    echo -e "${CYAN}Press Ctrl+C to exit${NC}"
+}
+
+# Main loop - update every second
+trap "tput cnorm; exit" INT TERM
+tput civis  # Hide cursor
+
+while true; do
+    calculate_speeds
+    sleep 1
+done

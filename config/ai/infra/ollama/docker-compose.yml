@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      # Ollama data following XDG Base Directory spec
+      - /home/mza/.local/share/ai/ollama:/root/.ollama
+    restart: unless-stopped
+    # Use host network for simplicity (can access other localhost services)
+    network_mode: host
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434

@@ -1,0 +1,112 @@
+#!/bin/bash
+# Manage default AI model configuration
+# Usage: model-manager [get|set|list]
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+CONFIG_DIR="${HOME}/.config/ai"
+CONFIG_FILE="${CONFIG_DIR}/config.json"
+
+# Initialize config if it doesn't exist
+initialize_config() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        mkdir -p "$CONFIG_DIR"
+        echo '{"default_model":"gpt-oss"}' > "$CONFIG_FILE"
+    fi
+}
+
+# Get the default model
+get_model() {
+    initialize_config
+    jq -r '.default_model // "gpt-oss"' "$CONFIG_FILE"
+}
+
+# Set the default model
+set_model() {
+    local model="$1"
+
+    if [ -z "$model" ]; then
+        echo -e "${RED}Error: Model name required${NC}"
+        echo "Usage: ai model set <model-name>"
+        exit 1
+    fi
+
+    initialize_config
+
+    # Update the config
+    jq ".default_model = \"$model\"" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"
+    mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+
+    echo -e "${GREEN}✓ Default model set to: ${model}${NC}"
+}
+
+# List available models
+list_models() {
+    echo -e "${BLUE}Available models:${NC}"
+    echo ""
+
+    # Check if LiteLLM is running
+    if ! curl -s -f http://localhost:4000/health > /dev/null 2>&1; then
+        echo -e "${YELLOW}Warning: LiteLLM is not running${NC}"
+        echo "Start it with: okonomi-ai-start"
+        exit 1
+    fi
+
+    # Get models from LiteLLM
+    curl -s -H "Authorization: Bearer 79c2ff4d0288cc8b158bf56fdb8d23fe1b9417e3378d80aa8b9bb1d5cdf90374" \
+        http://localhost:4000/v1/models | \
+        jq -r '.data[].id' | \
+        while read -r model; do
+            echo "  - $model"
+        done
+
+    echo ""
+    echo -e "${BLUE}Current default:${NC} $(get_model)"
+}
+
+# Show usage
+show_usage() {
+    echo "Usage: ai model <command>"
+    echo ""
+    echo "Commands:"
+    echo "  get              Show the current default model"
+    echo "  set <model>      Set the default model"
+    echo "  list             List all available models"
+    echo ""
+    echo "Examples:"
+    echo "  ai model get"
+    echo "  ai model set claude-sonnet-4-5"
+    echo "  ai model list"
+}
+
+# Main
+COMMAND="${1:-get}"
+
+case "$COMMAND" in
+    get)
+        get_model
+        ;;
+    set)
+        shift
+        set_model "$@"
+        ;;
+    list)
+        list_models
+        ;;
+    help|--help|-h)
+        show_usage
+        ;;
+    *)
+        echo -e "${RED}Error: Unknown command: $COMMAND${NC}"
+        echo ""
+        show_usage
+        exit 1
+        ;;
+esac

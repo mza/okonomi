@@ -1,0 +1,5 @@
+#!/bin/bash
+# List all registered utility bins
+# Usage: okonomi-ai-list-bins
+
+~/.local/bin/ai bin list

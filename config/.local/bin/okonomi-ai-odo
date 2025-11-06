@@ -1,0 +1,5 @@
+#!/bin/bash
+# Show AI token usage odometer
+# Usage: okonomi-ai-odo [reset]
+
+~/.local/bin/ai odo "$@"

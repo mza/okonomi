@@ -1,0 +1,141 @@
+#!/bin/bash
+# Helper: Quick chat with a model
+# Usage: ai chat [model]
+
+set -e
+
+# Get default model if not specified
+if [ -z "$1" ]; then
+    DEFAULT_MODEL=$(~/.local/bin/ai model get 2>/dev/null || echo "gpt-oss")
+    MODEL="$DEFAULT_MODEL"
+else
+    MODEL="$1"
+fi
+
+echo "Starting interactive chat with $MODEL via LiteLLM..."
+echo "Press Ctrl+D or type 'exit' to end the conversation"
+echo ""
+
+# Initialize conversation history
+MESSAGES="[]"
+
+# Chat loop with conversation history
+while true; do
+    echo -n "You: "
+    read -r USER_INPUT
+
+    if [ -z "$USER_INPUT" ] || [ "$USER_INPUT" = "exit" ]; then
+        break
+    fi
+
+    # Add user message to history
+    USER_INPUT_ESCAPED=$(echo "$USER_INPUT" | jq -Rs .)
+    MESSAGES=$(echo "$MESSAGES" | jq ". += [{\"role\": \"user\", \"content\": $USER_INPUT_ESCAPED}]")
+
+    # Get AI response with streaming
+    echo -n "AI: "
+
+    # Capture the full response and usage while streaming
+    FULL_RESPONSE=""
+    INPUT_TOKENS=0
+    OUTPUT_TOKENS=0
+    REQUEST_START=$(date +%s.%N)
+
+    # Setup live request tracking
+    LIVE_FILE="/tmp/ai_live_request_$$"
+    echo "$MODEL|$REQUEST_START|0|0|0|0.0" > "$LIVE_FILE"
+
+    # Track token count during streaming
+    STREAM_TOKENS=0
+
+    # Background process to update elapsed time continuously (for "thinking" indicator)
+    (
+        while [ -f "$LIVE_FILE" ]; do
+            sleep 0.5
+            if [ -f "$LIVE_FILE" ]; then
+                CURRENT_TIME=$(date +%s.%N)
+                ELAPSED=$(awk -v start="$REQUEST_START" -v now="$CURRENT_TIME" 'BEGIN {printf "%.1f", now - start}')
+                # Only update if file still exists and hasn't been deleted
+                [ -f "$LIVE_FILE" ] && echo "$MODEL|$REQUEST_START|0|$STREAM_TOKENS|$STREAM_TOKENS|$ELAPSED" > "$LIVE_FILE" 2>/dev/null || break
+            fi
+        done
+    ) &
+    ELAPSED_UPDATER_PID=$!
+
+    curl -s -N -X POST http://localhost:4000/v1/chat/completions \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer 79c2ff4d0288cc8b158bf56fdb8d23fe1b9417e3378d80aa8b9bb1d5cdf90374" \
+        -d "{
+            \"model\": \"$MODEL\",
+            \"messages\": $MESSAGES,
+            \"stream\": true,
+            \"stream_options\": {\"include_usage\": true}
+        }" | while IFS= read -r line; do
+            # Skip empty lines and [DONE] marker
+            if [[ "$line" == "data: [DONE]" ]] || [[ -z "$line" ]]; then
+                continue
+            fi
+
+            # Extract content from SSE data line
+            if [[ "$line" == data:* ]]; then
+                json_data="${line#data: }"
+
+                # Update elapsed time for live tracking (even during "thinking" phase)
+                CURRENT_TIME=$(date +%s.%N)
+                ELAPSED=$(awk -v start="$REQUEST_START" -v now="$CURRENT_TIME" 'BEGIN {printf "%.1f", now - start}')
+                echo "$MODEL|$REQUEST_START|0|$STREAM_TOKENS|$STREAM_TOKENS|$ELAPSED" > "$LIVE_FILE" 2>/dev/null || true
+
+                # Extract content
+                content=$(echo "$json_data" | jq -r '.choices[0].delta.content // empty' 2>/dev/null)
+                if [[ -n "$content" ]] && [[ "$content" != "null" ]]; then
+                    echo -n "$content"
+                    # Append to full response
+                    echo -n "$content" >> /tmp/chat_response_$$
+
+                    # Estimate tokens (rough: ~4 chars per token)
+                    STREAM_TOKENS=$((STREAM_TOKENS + ${#content} / 4))
+                fi
+
+                # Extract usage if present (comes in final chunk)
+                usage=$(echo "$json_data" | jq -r '.usage // empty' 2>/dev/null)
+                if [[ -n "$usage" ]] && [[ "$usage" != "null" ]] && [[ "$usage" != "" ]]; then
+                    INPUT_TOKENS=$(echo "$usage" | jq -r '.prompt_tokens // 0')
+                    OUTPUT_TOKENS=$(echo "$usage" | jq -r '.completion_tokens // 0')
+                    echo "$INPUT_TOKENS" > /tmp/chat_tokens_in_$$
+                    echo "$OUTPUT_TOKENS" > /tmp/chat_tokens_out_$$
+                fi
+            fi
+        done
+
+    echo ""
+    echo ""
+
+    # Clear live tracking
+    rm -f "$LIVE_FILE" 2>/dev/null || true
+    kill $ELAPSED_UPDATER_PID 2>/dev/null || true
+
+    # Calculate request duration
+    REQUEST_END=$(date +%s.%N)
+    DURATION=$(awk -v start="$REQUEST_START" -v end="$REQUEST_END" 'BEGIN {printf "%.3f", end - start}')
+
+    # Update odometer with token usage
+    if [ -f /tmp/chat_tokens_in_$$ ] && [ -f /tmp/chat_tokens_out_$$ ]; then
+        INPUT_TOKENS=$(cat /tmp/chat_tokens_in_$$)
+        OUTPUT_TOKENS=$(cat /tmp/chat_tokens_out_$$)
+        if [ "$INPUT_TOKENS" != "0" ] || [ "$OUTPUT_TOKENS" != "0" ]; then
+            # Ensure duration is set, default to 1.0 if calculation failed
+            DURATION=${DURATION:-1.0}
+            ~/.config/ai/orchestration/scripts/odometer-manager add "$INPUT_TOKENS" "$OUTPUT_TOKENS" "$MODEL" "$DURATION" 2>/dev/null || true
+        fi
+        rm -f /tmp/chat_tokens_in_$$ /tmp/chat_tokens_out_$$
+    fi
+
+    # Add assistant response to history
+    if [ -f /tmp/chat_response_$$ ]; then
+        ASSISTANT_RESPONSE=$(cat /tmp/chat_response_$$ | jq -Rs .)
+        MESSAGES=$(echo "$MESSAGES" | jq ". += [{\"role\": \"assistant\", \"content\": $ASSISTANT_RESPONSE}]")
+        rm -f /tmp/chat_response_$$
+    fi
+done
+
+echo "Chat ended."
