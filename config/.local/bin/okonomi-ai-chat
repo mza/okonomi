@@ -10,8 +10,4 @@ else
     MODEL="$1"
 fi
 
-echo "Starting Okonomi AI chat session with $MODEL..."
-echo "Type your questions about Okonomi development."
-echo ""
-
 ~/.local/bin/ai chat "$MODEL"
