@@ -1,0 +1,25 @@
+#!/bin/bash
+# Get info about a specific model from central config
+# Usage: okonomi-ai-get-model-info <model_name>
+
+MODELS_FILE="${HOME}/.config/ai/models.yaml"
+MODEL_NAME="$1"
+
+if [ -z "$MODEL_NAME" ]; then
+    echo "Error: Model name required" >&2
+    echo "Usage: okonomi-ai-get-model-info <model_name>" >&2
+    exit 1
+fi
+
+if [ ! -f "$MODELS_FILE" ]; then
+    echo "Error: Models config not found: $MODELS_FILE" >&2
+    exit 1
+fi
+
+# Try with yq first, fallback to grep
+if command -v yq >/dev/null 2>&1; then
+    yq eval ".model_list[] | select(.model_name == \"$MODEL_NAME\")" "$MODELS_FILE"
+else
+    # Simple grep-based extraction (less robust but works)
+    awk "/model_name: $MODEL_NAME/,/^  - model_name:|^[^ ]/" "$MODELS_FILE" | head -n -1
+fi

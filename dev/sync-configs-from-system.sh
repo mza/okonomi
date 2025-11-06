@@ -54,7 +54,7 @@ sync_directory_recursive() {
     local repo_dir="$1"
     local system_dir="$2"
 
-    [ -d "$repo_dir" ] || return
+    [ -d "$repo_dir" ] || return 0
 
     # Find all files recursively in the repo directory
     while IFS= read -r -d '' repo_file; do

@@ -1,0 +1,13 @@
+#!/bin/bash
+# List available model names from central config
+# Usage: okonomi-ai-list-model-names
+
+MODELS_FILE="${HOME}/.config/ai/models.yaml"
+
+if [ ! -f "$MODELS_FILE" ]; then
+    echo "Error: Models config not found: $MODELS_FILE" >&2
+    exit 1
+fi
+
+# Extract model names from YAML (simple grep-based parser)
+grep "^  - model_name:" "$MODELS_FILE" | awk '{print $3}' | sort

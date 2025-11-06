@@ -1,0 +1,28 @@
+#!/bin/bash
+# Get API key from central config
+# Usage: okonomi-ai-get-key <key_name>
+
+CONFIG_FILE="${HOME}/.config/ai/config.json"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Error: Config file not found: $CONFIG_FILE" >&2
+    exit 1
+fi
+
+KEY_NAME="$1"
+if [ -z "$KEY_NAME" ]; then
+    echo "Error: Key name required" >&2
+    echo "Usage: okonomi-ai-get-key <key_name>" >&2
+    echo "Available: anthropic, openai, litellm_master" >&2
+    exit 1
+fi
+
+# Get key from config
+KEY=$(jq -r ".api_keys.${KEY_NAME} // empty" "$CONFIG_FILE")
+
+if [ -z "$KEY" ]; then
+    # Key not set or empty
+    exit 1
+fi
+
+echo "$KEY"

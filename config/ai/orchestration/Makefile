@@ -46,6 +46,8 @@ start-infra:
 
 start-platform: start-infra
 	@echo "$(BLUE)Starting Platform Layer...$(NC)"
+	@echo "$(BLUE)  → Exporting keys from central config...$(NC)"
+	@$(PLATFORM_DIR)/litellm/generate-env.sh
 	@cd $(PLATFORM_DIR)/litellm && docker-compose up -d
 	@echo "$(GREEN)✓ LiteLLM started$(NC)"
 	@sleep 2

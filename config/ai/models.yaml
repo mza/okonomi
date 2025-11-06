@@ -1,0 +1,43 @@
+model_list:
+  # Ollama models (local)
+  - model_name: gpt-oss
+    litellm_params:
+      model: ollama_chat/gpt-oss  # Use ollama_chat for function calling
+      api_base: http://localhost:11434
+    model_info:
+      supports_function_calling: true  # Enable function calling for this model
+
+  # Example: Add more Ollama models here
+  # - model_name: llama3.2
+  #   litellm_params:
+  #     model: ollama_chat/llama3.2:3b
+  #     api_base: http://localhost:11434
+  #   model_info:
+  #     supports_function_calling: true
+
+  # Anthropic models (remote)
+  - model_name: claude-sonnet-4-5
+    litellm_params:
+      model: claude-sonnet-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-haiku-4-5
+    litellm_params:
+      model: claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-opus-4-1
+    litellm_params:
+      model: claude-opus-4-1
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+# General settings
+litellm_settings:
+  drop_params: false  # Keep all params - needed for function calling
+  success_callback: []
+  failure_callback: []
+
+# Optional: Set timeout
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY  # Optional: Protect your proxy with an API key
+  # database_url: "postgresql://..."  # Optional: For storing logs

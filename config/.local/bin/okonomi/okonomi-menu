@@ -24,8 +24,31 @@ show_main_menu() {
 }
 
 show_bins_menu() {
-  case $(menu "Bins" "Create") in
-  *Create*) okonomi-launch-imagine;;
+  # Build dynamic menu from registered bins
+  local bins
+  bins=$(okonomi-list-bin-names)
+
+  local menu_items="Create"
+  if [ -n "$bins" ]; then
+    # Add registered bins to menu
+    while IFS= read -r bin_name; do
+      menu_items="${menu_items}\n${bin_name}"
+    done <<< "$bins"
+  fi
+
+  local choice
+  choice=$(menu "Bins" "$menu_items")
+
+  case "${choice,,}" in
+  *create*)
+    okonomi-launch-create-bin
+    ;;
+  *)
+    # Launch the selected bin in floating terminal
+    if [ -n "$choice" ]; then
+      okonomi-launch-bin "$choice"
+    fi
+    ;;
   esac
 }
 

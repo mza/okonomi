@@ -1,0 +1,48 @@
+#!/bin/bash
+# Helper: One-shot completion (no streaming)
+# Usage: ai complete [model] "prompt"
+
+set -e
+
+# Get AI gateway endpoint and key (abstracted - could be LiteLLM, direct API, etc.)
+GATEWAY=$(okonomi-ai-get-endpoint ai_gateway)
+GATEWAY_KEY=$(okonomi-ai-get-key gateway)
+
+# Get model
+if [ -z "$1" ]; then
+    MODEL=$(~/.local/bin/ai model get 2>/dev/null || echo "gpt-oss")
+else
+    MODEL="$1"
+    shift
+fi
+
+# Get prompt
+if [ -z "$1" ]; then
+    echo "Error: Prompt required"
+    echo "Usage: ai complete [model] \"prompt\""
+    exit 1
+fi
+
+PROMPT="$*"
+
+# Make request to gateway (OpenAI-compatible API)
+RESPONSE=$(curl -s -X POST "$GATEWAY/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GATEWAY_KEY" \
+  -d "{
+    \"model\": \"$MODEL\",
+    \"messages\": [{\"role\": \"user\", \"content\": $(echo "$PROMPT" | jq -Rs .)}],
+    \"temperature\": 0.7,
+    \"max_tokens\": 4000
+  }")
+
+# Extract and return just the content
+CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+
+if [ -z "$CONTENT" ]; then
+    echo "Error: No response from AI" >&2
+    echo "$RESPONSE" | jq -r '.error.message // "Unknown error"' >&2
+    exit 1
+fi
+
+echo "$CONTENT"

@@ -30,7 +30,8 @@ window#waybar {
 }
 
 #workspaces button:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background-color: #4e4170;
+  color: #d0d0d0;
 }
 
 /* AI Widget Styling */

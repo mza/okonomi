@@ -1,0 +1,22 @@
+#!/bin/bash
+# Get endpoint from central config (internal use only)
+# Usage: okonomi-ai-get-endpoint <endpoint_name>
+
+CONFIG_FILE="${HOME}/.config/ai/config.json"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "http://localhost:4000"  # Default gateway
+    exit 0
+fi
+
+ENDPOINT_NAME="$1"
+
+# Get endpoint from config
+ENDPOINT=$(jq -r ".endpoints.${ENDPOINT_NAME} // empty" "$CONFIG_FILE" 2>/dev/null)
+
+if [ -z "$ENDPOINT" ]; then
+    # Return default
+    echo "http://localhost:4000"
+else
+    echo "$ENDPOINT"
+fi

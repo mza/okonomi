@@ -4,6 +4,10 @@
 
 set -e
 
+# Get AI gateway endpoint and key (abstracted)
+GATEWAY=$(okonomi-ai-get-endpoint ai_gateway)
+GATEWAY_KEY=$(okonomi-ai-get-key gateway)
+
 # Get default model if not specified
 if [ -z "$1" ]; then
     DEFAULT_MODEL=$(~/.local/bin/ai model get 2>/dev/null || echo "gpt-oss")
@@ -12,7 +16,7 @@ else
     MODEL="$1"
 fi
 
-echo "Starting interactive chat with $MODEL via LiteLLM..."
+echo "Starting interactive chat with $MODEL..."
 echo "Press Ctrl+D or type 'exit' to end the conversation"
 echo ""
 
@@ -62,9 +66,9 @@ while true; do
     ) &
     ELAPSED_UPDATER_PID=$!
 
-    curl -s -N -X POST http://localhost:4000/v1/chat/completions \
+    curl -s -N -X POST "$GATEWAY/v1/chat/completions" \
         -H "Content-Type: application/json" \
-        -H "Authorization: Bearer 79c2ff4d0288cc8b158bf56fdb8d23fe1b9417e3378d80aa8b9bb1d5cdf90374" \
+        -H "Authorization: Bearer $GATEWAY_KEY" \
         -d "{
             \"model\": \"$MODEL\",
             \"messages\": $MESSAGES,

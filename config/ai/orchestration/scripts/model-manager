@@ -52,20 +52,10 @@ list_models() {
     echo -e "${BLUE}Available models:${NC}"
     echo ""
 
-    # Check if LiteLLM is running
-    if ! curl -s -f http://localhost:4000/health > /dev/null 2>&1; then
-        echo -e "${YELLOW}Warning: LiteLLM is not running${NC}"
-        echo "Start it with: okonomi-ai-start"
-        exit 1
-    fi
-
-    # Get models from LiteLLM
-    curl -s -H "Authorization: Bearer 79c2ff4d0288cc8b158bf56fdb8d23fe1b9417e3378d80aa8b9bb1d5cdf90374" \
-        http://localhost:4000/v1/models | \
-        jq -r '.data[].id' | \
-        while read -r model; do
-            echo "  - $model"
-        done
+    # Use wrapper to get models from central config
+    okonomi-ai-list-model-names | while read -r model; do
+        echo "  - $model"
+    done
 
     echo ""
     echo -e "${BLUE}Current default:${NC} $(get_model)"

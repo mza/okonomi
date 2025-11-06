@@ -1,0 +1,11 @@
+#!/bin/bash
+# List bin names for menu integration
+# Outputs newline-separated list of bin names
+
+REGISTRY_FILE="${HOME}/.config/ai/bins/registry.json"
+
+if [ ! -f "$REGISTRY_FILE" ]; then
+    exit 0
+fi
+
+jq -r '.bins | keys[]' "$REGISTRY_FILE" 2>/dev/null | sort

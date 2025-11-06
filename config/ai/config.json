@@ -1,3 +1,8 @@
 {
-  "default_model": "gpt-oss"
+  "default_model": "gpt-oss",
+  "api_keys": {
+    "anthropic": "",
+    "openai": "",
+    "gateway": ""
+  }
 }
