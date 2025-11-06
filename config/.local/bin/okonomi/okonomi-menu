@@ -35,6 +35,7 @@ show_bins_menu() {
       menu_items="${menu_items}\n${bin_name}"
     done <<< "$bins"
   fi
+  menu_items="${menu_items}\nManage"
 
   local choice
   choice=$(menu "Bins" "$menu_items")
@@ -42,6 +43,9 @@ show_bins_menu() {
   case "${choice,,}" in
   *create*)
     okonomi-launch-create-bin
+    ;;
+  *manage*)
+    setsid uwsm-app -- alacritty --class=Imagine -e bash -c "~/.local/bin/ai bin list; echo; read -n1 -p 'Press any key to close...'"
     ;;
   *)
     # Launch the selected bin in floating terminal
