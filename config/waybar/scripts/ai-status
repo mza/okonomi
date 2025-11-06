@@ -34,10 +34,13 @@ TRIP_FORMATTED=$(format_tokens $TRIP_TOTAL)
 # Check for live request
 LIVE_REQUEST=$(ls /tmp/ai_live_request_* 2>/dev/null | head -1)
 if [ -n "$LIVE_REQUEST" ] && [ -f "$LIVE_REQUEST" ]; then
-    # Check if file is stale (not modified in last 10 seconds)
-    FILE_AGE=$(( $(date +%s) - $(stat -c %Y "$LIVE_REQUEST" 2>/dev/null || echo 0) ))
-    if [ "$FILE_AGE" -gt 10 ]; then
-        # File is stale - clean it up and ignore
+    # Read elapsed time from file content
+    IFS='|' read -r _ _ _ _ _ file_elapsed < "$LIVE_REQUEST"
+
+    # If request has been running for more than 10 minutes (600s), consider it stale
+    if [ -n "$file_elapsed" ] && [ "$(echo "$file_elapsed > 600" | bc -l 2>/dev/null || echo 0)" = "1" ]; then
+        # Request is stale (>10min) - clean it up and kill orphaned updater
+        pkill -f "ai_live_request_$(basename "$LIVE_REQUEST" | cut -d_ -f4)" 2>/dev/null || true
         rm -f "$LIVE_REQUEST" 2>/dev/null || true
         LIVE_REQUEST=""
     fi
