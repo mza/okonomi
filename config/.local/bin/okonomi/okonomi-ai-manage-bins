@@ -1,0 +1,205 @@
+#!/bin/bash
+# Interactive Bin Manager
+# Manage AI utility bins: view, install, uninstall, rename, delete
+
+REGISTRY_FILE="${HOME}/.config/ai/bins/registry.json"
+BIN_TOOL="${HOME}/.local/bin/ai"
+
+# Colors for output
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Show header
+show_header() {
+    clear
+    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║      AI Bin Manager - Okonomi OS      ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+    echo
+}
+
+# Get list of bins
+get_bins() {
+    if [ ! -f "$REGISTRY_FILE" ]; then
+        echo ""
+        return
+    fi
+    jq -r '.bins | keys[]' "$REGISTRY_FILE" 2>/dev/null || echo ""
+}
+
+# Main loop
+while true; do
+    show_header
+
+    # Get bins
+    bins=$(get_bins)
+
+    if [ -z "$bins" ]; then
+        echo -e "${YELLOW}No bins registered yet.${NC}"
+        echo
+        echo "Press any key to exit..."
+        read -n1 -s
+        exit 0
+    fi
+
+    # Display bins
+    echo -e "${GREEN}Registered Bins:${NC}"
+    echo
+
+    bin_array=()
+    i=1
+    while IFS= read -r bin_name; do
+        bin_array+=("$bin_name")
+
+        desc=$(jq -r ".bins[\"$bin_name\"].description" "$REGISTRY_FILE" 2>/dev/null || echo "No description")
+
+        if [ -x "${HOME}/.local/bin/${bin_name}" ]; then
+            status="${GREEN}✓${NC}"
+        else
+            status="${RED}✗${NC}"
+        fi
+
+        echo -e "  ${BLUE}$i${NC}. ${status} ${YELLOW}${bin_name}${NC}"
+        echo -e "     ${desc}"
+        echo
+        ((i++))
+    done <<< "$bins"
+
+    # Get selection
+    echo -e "${BLUE}Select a bin [1-${#bin_array[@]}] or 'q' to quit:${NC} "
+    read -r choice
+
+    if [[ "$choice" == "q" ]] || [[ "$choice" == "Q" ]]; then
+        clear
+        exit 0
+    fi
+
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#bin_array[@]}" ]; then
+        echo -e "${RED}Invalid selection.${NC}"
+        sleep 1
+        continue
+    fi
+
+    # Get selected bin
+    selected_bin="${bin_array[$((choice-1))]}"
+
+    # Bin action menu
+    while true; do
+        show_header
+
+        desc=$(jq -r ".bins[\"$selected_bin\"].description" "$REGISTRY_FILE" 2>/dev/null || echo "No description")
+        version=$(jq -r ".bins[\"$selected_bin\"].version" "$REGISTRY_FILE" 2>/dev/null || echo "1.0.0")
+        path=$(jq -r ".bins[\"$selected_bin\"].path" "$REGISTRY_FILE" 2>/dev/null || echo "Unknown")
+
+        echo -e "${GREEN}Bin: ${YELLOW}${selected_bin}${NC}"
+        echo -e "${GREEN}Description:${NC} ${desc}"
+        echo -e "${GREEN}Version:${NC} ${version}"
+        echo -e "${GREEN}Path:${NC} ${path}"
+        echo
+
+        if [ -x "${HOME}/.local/bin/${selected_bin}" ]; then
+            is_installed=true
+            echo -e "${GREEN}Status: Installed ✓${NC}"
+        else
+            is_installed=false
+            echo -e "${YELLOW}Status: Not installed${NC}"
+        fi
+        echo
+
+        echo -e "${BLUE}Actions:${NC}"
+        echo "  1. View script"
+        echo "  2. Rename"
+        echo "  3. Delete"
+        echo "  b. Back to list"
+        echo "  q. Quit"
+        echo
+        echo -n "Select action: "
+        read -r action
+
+        case "$action" in
+            1)
+                # View script
+                show_header
+                echo -e "${GREEN}Script: ${YELLOW}${selected_bin}${NC}"
+                echo -e "${BLUE}────────────────────────────────────────${NC}"
+                echo
+                if [ -f "$path" ]; then
+                    cat -n "$path"
+                else
+                    echo -e "${RED}Script file not found: ${path}${NC}"
+                fi
+                echo
+                echo "Press any key to continue..."
+                read -n1 -s
+                ;;
+            2)
+                # Rename
+                echo
+                echo -e "${BLUE}Current name: ${YELLOW}${selected_bin}${NC}"
+                echo -n "Enter new name (or 'c' to cancel): "
+                read -r new_name
+
+                if [[ "$new_name" != "c" ]] && [[ "$new_name" != "C" ]] && [[ -n "$new_name" ]]; then
+                    if jq -e ".bins[\"$new_name\"]" "$REGISTRY_FILE" > /dev/null 2>&1; then
+                        echo -e "${RED}✗ A bin with name '${new_name}' already exists.${NC}"
+                        sleep 2
+                    else
+                        old_path="$path"
+                        new_path="${HOME}/.local/share/ai/bins/${new_name}"
+
+                        # Update registry
+                        jq ".bins[\"$new_name\"] = .bins[\"$selected_bin\"] | .bins[\"$new_name\"].path = \"$new_path\" | del(.bins[\"$selected_bin\"])" "$REGISTRY_FILE" > "${REGISTRY_FILE}.tmp" && mv "${REGISTRY_FILE}.tmp" "$REGISTRY_FILE"
+
+                        # Rename file
+                        [ -f "$old_path" ] && mv "$old_path" "$new_path"
+
+                        # Update symlink if installed
+                        if [ -L "${HOME}/.local/bin/${selected_bin}" ]; then
+                            rm -f "${HOME}/.local/bin/${selected_bin}"
+                            ln -s "$new_path" "${HOME}/.local/bin/${new_name}"
+                            chmod +x "$new_path"
+                        fi
+
+                        echo -e "${GREEN}✓ Renamed successfully${NC}"
+                        sleep 1
+                        break
+                    fi
+                fi
+                ;;
+            3)
+                # Delete
+                echo
+                echo -e "${RED}WARNING: This will permanently delete the bin '${selected_bin}'.${NC}"
+                echo -n "Type 'DELETE' to confirm: "
+                read -r confirm
+
+                if [[ "$confirm" == "DELETE" ]]; then
+                    if "$BIN_TOOL" bin remove "$selected_bin" 2>/dev/null; then
+                        echo -e "${GREEN}✓ Deleted successfully${NC}"
+                    else
+                        echo -e "${RED}✗ Deletion failed${NC}"
+                    fi
+                    sleep 1
+                    break
+                else
+                    echo "Cancelled."
+                    sleep 1
+                fi
+                ;;
+            b|B)
+                break
+                ;;
+            q|Q)
+                clear
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Invalid action.${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+done

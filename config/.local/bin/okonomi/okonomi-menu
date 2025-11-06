@@ -45,7 +45,7 @@ show_bins_menu() {
     okonomi-launch-create-bin
     ;;
   *manage*)
-    setsid uwsm-app -- alacritty --class=Imagine -e bash -c "~/.local/bin/ai bin list; echo; read -n1 -p 'Press any key to close...'"
+    setsid uwsm-app -- alacritty --class=Imagine -e ~/.local/bin/okonomi/okonomi-ai-manage-bins
     ;;
   *)
     # Launch the selected bin in floating terminal
