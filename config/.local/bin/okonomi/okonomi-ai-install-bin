@@ -1,12 +1,24 @@
 #!/bin/bash
-# Install a bin to PATH
-# Usage: okonomi-ai-install-bin <bin-name>
+# Install a bin by creating a wrapper script that calls the runner
 
-if [ -z "$1" ]; then
+RUNNER="${HOME}/.local/bin/okonomi/okonomi-ai-run-bin"
+
+bin_name="$1"
+
+if [ -z "$bin_name" ]; then
     echo "Usage: okonomi-ai-install-bin <bin-name>"
-    echo ""
-    echo "Example: okonomi-ai-install-bin my-tool"
     exit 1
 fi
 
-~/.local/bin/ai bin install "$1"
+# Create wrapper script
+wrapper_path="${HOME}/.local/bin/${bin_name}"
+
+cat > "$wrapper_path" <<WRAPPER
+#!/bin/bash
+# Wrapper for ${bin_name} - routes through runner
+exec "${RUNNER}" "${bin_name}" "\$@"
+WRAPPER
+
+chmod +x "$wrapper_path"
+
+echo "✓ Installed ${bin_name} to ${wrapper_path}"

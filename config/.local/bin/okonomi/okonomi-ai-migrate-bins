@@ -1,0 +1,72 @@
+#!/bin/bash
+# One-time migration script to convert bins to versioned structure
+
+BINS_DIR="${HOME}/.local/share/ai/bins"
+REGISTRY_FILE="${HOME}/.config/ai/bins/registry.json"
+
+echo "Migrating bins to versioned structure..."
+echo
+
+# Get list of bins from registry
+bin_names=$(jq -r '.bins | keys[]' "$REGISTRY_FILE" 2>/dev/null)
+
+if [ -z "$bin_names" ]; then
+    echo "No bins to migrate."
+    exit 0
+fi
+
+while IFS= read -r bin_name; do
+    bin_path="${BINS_DIR}/${bin_name}"
+
+    # Check if it's a file (old structure)
+    if [ -f "$bin_path" ]; then
+        echo "Migrating: ${bin_name}"
+
+        # Get creation timestamp from registry
+        created=$(jq -r ".bins[\"$bin_name\"].created" "$REGISTRY_FILE")
+
+        # Backup the file
+        cp "$bin_path" "${bin_path}.backup"
+
+        # Create directory structure
+        mkdir -p "${bin_path}.tmp"
+        mv "${bin_path}.backup" "${bin_path}.tmp/v1"
+        chmod +x "${bin_path}.tmp/v1"
+
+        # Create current symlink
+        ln -s v1 "${bin_path}.tmp/current"
+
+        # Replace file with directory
+        rm -f "$bin_path"
+        mv "${bin_path}.tmp" "$bin_path"
+
+        # Update registry with version metadata
+        jq ".bins[\"$bin_name\"].current_version = \"v1\" |
+            .bins[\"$bin_name\"].version = \"1\" |
+            .bins[\"$bin_name\"].versions = {
+                \"v1\": {
+                    \"created\": \"$created\",
+                    \"prompt\": null,
+                    \"parent\": null
+                }
+            }" "$REGISTRY_FILE" > "${REGISTRY_FILE}.tmp"
+        mv "${REGISTRY_FILE}.tmp" "$REGISTRY_FILE"
+
+        # Update main symlink
+        if [ -L "${HOME}/.local/bin/${bin_name}" ]; then
+            rm -f "${HOME}/.local/bin/${bin_name}"
+            ln -s "${bin_path}/current" "${HOME}/.local/bin/${bin_name}"
+        fi
+
+        echo "  ✓ Migrated to versioned structure"
+        echo
+    elif [ -d "$bin_path" ]; then
+        echo "Skipping: ${bin_name} (already versioned)"
+        echo
+    else
+        echo "Warning: ${bin_name} not found at ${bin_path}"
+        echo
+    fi
+done <<< "$bin_names"
+
+echo "Migration complete!"

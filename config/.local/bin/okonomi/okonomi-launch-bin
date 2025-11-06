@@ -8,12 +8,8 @@ if [ -z "$bin_name" ]; then
     exit 1
 fi
 
-bin_path="$HOME/.local/share/ai/bins/$bin_name"
+# Use the runner to execute the bin
+runner="${HOME}/.local/bin/okonomi/okonomi-ai-run-bin"
 
-if [ ! -f "$bin_path" ]; then
-    # Try direct command if not in bins dir
-    bin_path="$bin_name"
-fi
-
-cmd="$bin_path; echo; read -n1 -p 'Press any key to close...'"
+cmd="$runner $bin_name; echo; read -n1 -p 'Press any key to close...'"
 exec setsid uwsm-app -- alacritty --class=Imagine -e bash -c "$cmd"

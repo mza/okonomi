@@ -1,0 +1,135 @@
+#!/bin/bash
+# Modify an existing bin using AI
+
+REGISTRY_FILE="${HOME}/.config/ai/bins/registry.json"
+AI_COMPLETE="${HOME}/.config/ai/helpers/complete"
+DEFAULT_MODEL=$(okonomi-ai-get-model)
+
+bin_name="$1"
+
+# If no bin name provided, error
+if [ -z "$bin_name" ]; then
+    echo "Usage: okonomi-ai-modify-bin <bin-name>"
+    exit 1
+fi
+
+# Check if bin exists
+if ! jq -e ".bins[\"$bin_name\"]" "$REGISTRY_FILE" > /dev/null 2>&1; then
+    echo "Error: Bin '${bin_name}' not found in registry."
+    exit 1
+fi
+
+# Get bin info
+bin_path=$(jq -r ".bins[\"$bin_name\"].path" "$REGISTRY_FILE")
+current_version=$(jq -r ".bins[\"$bin_name\"].current_version" "$REGISTRY_FILE")
+description=$(jq -r ".bins[\"$bin_name\"].description" "$REGISTRY_FILE")
+
+# Read current script
+current_script=$(cat "${bin_path}/current")
+
+# Show current version info
+echo
+echo "Bin: ${bin_name}"
+echo "Description: ${description}"
+echo "Current version: ${current_version}"
+
+# Get last modification prompt if exists
+last_prompt=$(jq -r ".bins[\"$bin_name\"].versions[\"$current_version\"].prompt // \"Original version\"" "$REGISTRY_FILE")
+echo "Last change: ${last_prompt}"
+echo
+
+# Get modification request
+echo "What changes do you want?"
+echo -n "> "
+read -r modification_request
+
+if [ -z "$modification_request" ]; then
+    echo "No changes requested."
+    exit 0
+fi
+
+echo
+echo "Generating modified script..."
+
+# Build AI prompt
+SYSTEM_PROMPT="You are a bash script modifier for Okonomi OS utility bins.
+
+CONTEXT:
+Current bin name: ${bin_name}
+Current description: ${description}
+Current script:
+${current_script}
+
+USER REQUEST:
+${modification_request}
+
+INSTRUCTIONS:
+1. Analyze the current script and understand its functionality
+2. Apply the user's requested modifications
+3. Preserve the shebang (#!/bin/bash)
+4. Maintain or improve code quality
+5. Keep the same general purpose unless explicitly asked to change it
+6. Output ONLY the complete modified script, no explanations, no markdown code blocks
+
+OUTPUT FORMAT:
+The complete bash script starting with #!/bin/bash"
+
+# Get AI modification
+modified_script=$("$AI_COMPLETE" "$DEFAULT_MODEL" "$SYSTEM_PROMPT")
+
+if [ -z "$modified_script" ]; then
+    echo "Error: AI returned empty response"
+    exit 1
+fi
+
+# Lint the modified script
+echo "Linting modified script..."
+if ! bash -n <(echo "$modified_script") 2>&1; then
+    echo
+    echo "Error: Modified script has syntax errors. Not applying."
+    exit 1
+fi
+
+echo "✓ Script passes syntax check"
+echo
+
+# Ask for confirmation
+echo "Modified script is ready. Apply changes? [y/N] "
+read -r confirm
+
+if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo "Changes discarded."
+    exit 0
+fi
+
+# Calculate next version number
+current_version_num=$(jq -r ".bins[\"$bin_name\"].version" "$REGISTRY_FILE")
+next_version_num=$((current_version_num + 1))
+next_version="v${next_version_num}"
+
+# Save new version
+echo "$modified_script" > "${bin_path}/${next_version}"
+chmod +x "${bin_path}/${next_version}"
+
+# Update current symlink
+ln -sf "${next_version}" "${bin_path}/current"
+
+# Get timestamp
+timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Update registry
+jq ".bins[\"$bin_name\"].version = \"$next_version_num\" |
+    .bins[\"$bin_name\"].current_version = \"$next_version\" |
+    .bins[\"$bin_name\"].updated = \"$timestamp\" |
+    .bins[\"$bin_name\"].versions[\"$next_version\"] = {
+        \"created\": \"$timestamp\",
+        \"prompt\": \"$modification_request\",
+        \"parent\": \"$current_version\"
+    }" "$REGISTRY_FILE" > "${REGISTRY_FILE}.tmp"
+mv "${REGISTRY_FILE}.tmp" "$REGISTRY_FILE"
+
+echo
+echo "✓ Bin modified successfully"
+echo "  New version: ${next_version}"
+echo "  Location: ${bin_path}/${next_version}"
+echo

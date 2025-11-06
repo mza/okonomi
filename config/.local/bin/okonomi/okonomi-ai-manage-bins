@@ -113,6 +113,8 @@ while true; do
         echo "  1. View script"
         echo "  2. Rename"
         echo "  3. Delete"
+        echo "  4. Modify with AI"
+        echo "  5. Version history"
         echo "  b. Back to list"
         echo "  q. Quit"
         echo
@@ -188,6 +190,14 @@ while true; do
                     echo "Cancelled."
                     sleep 1
                 fi
+                ;;
+            4)
+                # Modify with AI
+                ~/.local/bin/okonomi/okonomi-ai-modify-bin "$selected_bin"
+                ;;
+            5)
+                # Version history
+                ~/.local/bin/okonomi/okonomi-ai-bin-versions "$selected_bin"
                 ;;
             b|B)
                 break

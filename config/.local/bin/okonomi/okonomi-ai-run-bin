@@ -1,0 +1,42 @@
+#!/bin/bash
+# Bin runner - wraps execution of AI-generated bins
+# Provides central control point for sandboxing, logging, etc.
+
+REGISTRY_FILE="${HOME}/.config/ai/bins/registry.json"
+LOG_DIR="${HOME}/.local/share/ai/logs"
+
+bin_name="$1"
+shift  # Remove bin name, keep remaining args
+
+if [ -z "$bin_name" ]; then
+    echo "Usage: okonomi-ai-run-bin <bin-name> [args...]"
+    exit 1
+fi
+
+# Check if bin exists in registry
+if ! jq -e ".bins[\"$bin_name\"]" "$REGISTRY_FILE" > /dev/null 2>&1; then
+    echo "Error: Bin '${bin_name}' not found in registry."
+    exit 1
+fi
+
+# Get bin path from registry
+bin_path=$(jq -r ".bins[\"$bin_name\"].path" "$REGISTRY_FILE")
+current_version=$(jq -r ".bins[\"$bin_name\"].current_version" "$REGISTRY_FILE")
+
+# Resolve to actual script
+script_path="${bin_path}/current"
+
+if [ ! -f "$script_path" ] && [ ! -L "$script_path" ]; then
+    echo "Error: Script not found at ${script_path}"
+    exit 1
+fi
+
+# Create log directory if needed
+mkdir -p "$LOG_DIR"
+
+# Log execution
+timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+echo "${timestamp} | ${bin_name} (${current_version}) | $*" >> "${LOG_DIR}/bin-executions.log"
+
+# Execute the bin with all arguments
+exec "$script_path" "$@"
