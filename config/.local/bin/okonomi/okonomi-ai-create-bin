@@ -46,51 +46,69 @@ echo -e "${BLUE}Step 1: Running AI agent to create the bin...${NC}"
 echo "Task: $DESCRIPTION"
 echo ""
 
-# Build the agent prompt - let AI choose the bin name
-AGENT_PROMPT="Create a bash utility script that $DESCRIPTION.
+# Use AI to generate the script content
+AI_COMPLETE="${HOME}/.config/ai/helpers/complete"
 
-IMPORTANT: Create the file in the current working directory: $WORK_DIR
+SYSTEM_PROMPT="You are a utility script generator. Generate a complete, working bash script based on the user's description.
+
+CRITICAL: OUTPUT MUST BE BASH, NOT PYTHON OR ANY OTHER LANGUAGE.
 
 Requirements:
-- Choose an appropriate, short, memorable name for this utility (e.g., 'json-fmt', 'git-sync', 'db-backup')
-- Create a file in $WORK_DIR named '<your-chosen-name>' (no .sh extension)
-- Must be a standalone executable bash script
-- Start with #!/bin/bash shebang
-- Include 'set -e' for error handling
-- Add helpful comments at the top explaining what it does
-- Include a --help flag that explains usage
-- Include a --version flag showing v1.0.0
-- Make it production-ready with proper error messages
-- Output should be clean and user-friendly
-- Handle edge cases gracefully
+1. Start with #!/bin/bash shebang
+2. Include clear comments explaining what the script does
+3. Use 'set -e' for error handling
+4. Include helpful usage messages
+5. Make it production-ready and robust
+6. Add --help flag support
+7. Add --version flag showing v1.0.0
+8. Keep it focused and simple
+9. MUST BE BASH - no Python, JavaScript, or other languages
 
-Use bash commands to create the script file in $WORK_DIR and make it executable with chmod +x."
+Also suggest a short, kebab-case name for the script (like 'coin-toss', 'git-sync', 'db-backup').
 
-# Run the agent (change to work dir first)
-cd "$WORK_DIR"
-~/.local/bin/ai agent "$MODEL" "$AGENT_PROMPT"
+Format your response EXACTLY like this:
+NAME: suggested-script-name
+DESCRIPTION: One-line description of what it does
 
-echo ""
-echo -e "${GREEN}✓ Agent completed${NC}"
-echo ""
+SCRIPT:
+#!/bin/bash
+# Script content here
+...rest of script...
 
-# Find the generated script (look for executable files or .sh files)
-GENERATED_FILE=$(find "$WORK_DIR" -type f \( -executable -o -name "*.sh" \) ! -name ".*" | head -1)
+Do not include any other text, markdown code blocks, or explanations outside this format."
 
-if [ -z "$GENERATED_FILE" ] || [ ! -f "$GENERATED_FILE" ]; then
-    echo -e "${YELLOW}Looking for any script files...${NC}"
-    GENERATED_FILE=$(find "$WORK_DIR" -type f ! -name ".*" | head -1)
-fi
+FULL_PROMPT="$SYSTEM_PROMPT
 
-if [ -z "$GENERATED_FILE" ] || [ ! -f "$GENERATED_FILE" ]; then
-    echo -e "${RED}Error: Could not find generated script${NC}"
-    echo "Files in work directory:"
-    ls -la "$WORK_DIR"
+User request: $DESCRIPTION"
+
+echo "Generating script with AI..."
+AI_RESPONSE=$("$AI_COMPLETE" "$MODEL" "$FULL_PROMPT")
+
+if [ -z "$AI_RESPONSE" ]; then
+    echo -e "${RED}Error: Failed to generate script${NC}"
     exit 1
 fi
 
-# Extract the bin name from the generated filename
-BIN_NAME=$(basename "$GENERATED_FILE" .sh)
+# Parse the response
+BIN_NAME=$(echo "$AI_RESPONSE" | grep "^NAME:" | sed 's/^NAME: *//')
+BIN_DESCRIPTION=$(echo "$AI_RESPONSE" | grep "^DESCRIPTION:" | sed 's/^DESCRIPTION: *//')
+SCRIPT_CONTENT=$(echo "$AI_RESPONSE" | sed -n '/^SCRIPT:/,$ p' | tail -n +2)
+
+if [ -z "$BIN_NAME" ] || [ -z "$SCRIPT_CONTENT" ]; then
+    echo -e "${RED}Error: AI response was not in the expected format${NC}"
+    echo "Response:"
+    echo "$AI_RESPONSE"
+    exit 1
+fi
+
+# Create the script file
+GENERATED_FILE="$WORK_DIR/$BIN_NAME"
+echo "$SCRIPT_CONTENT" > "$GENERATED_FILE"
+chmod +x "$GENERATED_FILE"
+
+echo ""
+echo -e "${GREEN}✓ Script generated${NC}"
+echo ""
 
 echo -e "${BLUE}Step 2: Registering bin...${NC}"
 echo ""
@@ -138,8 +156,8 @@ fi
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 AUTHOR=$(whoami)
 
-# Add to registry using jq with versioning
-jq --arg desc "$DESCRIPTION" \
+# Add to registry using jq with versioning (use AI's description if available)
+jq --arg desc "${BIN_DESCRIPTION:-$DESCRIPTION}" \
    --arg author "$AUTHOR" \
    --arg timestamp "$TIMESTAMP" \
    --arg path "$BIN_PATH" \
