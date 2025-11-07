@@ -49,9 +49,11 @@ echo ""
 # Build the agent prompt - let AI choose the bin name
 AGENT_PROMPT="Create a bash utility script that $DESCRIPTION.
 
+IMPORTANT: Create the file in the current working directory: $WORK_DIR
+
 Requirements:
 - Choose an appropriate, short, memorable name for this utility (e.g., 'json-fmt', 'git-sync', 'db-backup')
-- Create a file named '<your-chosen-name>' (no .sh extension)
+- Create a file in $WORK_DIR named '<your-chosen-name>' (no .sh extension)
 - Must be a standalone executable bash script
 - Start with #!/bin/bash shebang
 - Include 'set -e' for error handling
@@ -62,9 +64,10 @@ Requirements:
 - Output should be clean and user-friendly
 - Handle edge cases gracefully
 
-Create the script file with the name you choose."
+Use bash commands to create the script file in $WORK_DIR and make it executable with chmod +x."
 
-# Run the agent
+# Run the agent (change to work dir first)
+cd "$WORK_DIR"
 ~/.local/bin/ai agent "$MODEL" "$AGENT_PROMPT"
 
 echo ""
